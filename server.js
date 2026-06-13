@@ -27,6 +27,21 @@ require('./config/passport')(passport);
 
 const app = express();
 
+const corsOptions = {
+  origin: [
+    'http://127.0.0.1:5500',
+    'http://localhost:5500',
+    process.env.CLIENT_URL
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+
 // ── SECURITY MIDDLEWARE ──────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(mongoSanitize());
@@ -45,13 +60,7 @@ const authLimiter = rateLimit({
 app.use('/api/', limiter);
 app.use('/api/auth/', authLimiter);
 
-// ── CORE MIDDLEWARE ──────────────────────────────────────
-app.use(cors({
-  origin: [process.env.CLIENT_URL || 'http://localhost:3000', 'http://localhost:5500', 'http://127.0.0.1:5500'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(passport.initialize());
