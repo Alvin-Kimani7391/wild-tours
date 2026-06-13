@@ -87,7 +87,7 @@ if (process.env.NODE_ENV === 'development') {
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── ROUTES ───────────────────────────────────────────────
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/tours', tourRoutes);
 app.use('/api/volunteer', volunteerRoutes);
 app.use('/api/bookings', bookingRoutes);
