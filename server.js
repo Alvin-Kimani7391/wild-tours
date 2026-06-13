@@ -62,14 +62,14 @@ app.use(mongoSanitize());
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 1 * 60 * 1000, // 1 minute
   max: 200,
   message: { success: false, message: 'Too many requests, please try again later.' }
 });
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 1 * 60 * 1000, // 1 minute
   max: 20,
-  message: { success: false, message: 'Too many auth attempts, please try again in 15 minutes.' }
+  message: { success: false, message: 'Too many auth attempts, please try again in 1 minute.' }
 });
 app.use('/api/', limiter);
 app.use('/api/auth/', authLimiter);
@@ -88,16 +88,16 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── ROUTES ───────────────────────────────────────────────
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/tours', tourRoutes);
-app.use('/api/volunteer', volunteerRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/applications', applicationRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/blog', blogRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/uploads', uploadRoutes);
+app.use('/api/tours',require('./routes/tours'));
+app.use('/api/volunteer',require('./routes/volunteer'));
+app.use('/api/bookings', require('./routes/bookings'));
+app.use('/api/applications', require('./routes/applications'));
+app.use('/api/payments', require('./routes/payments'));
+app.use('/api/users', require('./routes/users'));
+app.use('/api/reviews', require('./routes/reviews'));
+app.use('/api/blog', require('./routes/blog'));
+app.use('/api/dashboard', require('./routes/dashboard'));
+app.use('/api/uploads', require('./routes/uploads'));
 
 // ── HEALTH CHECK ─────────────────────────────────────────
 app.get('/api/health', (req, res) => {
