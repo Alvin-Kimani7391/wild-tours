@@ -27,19 +27,33 @@ require('./config/passport')(passport);
 
 const app = express();
 
-const corsOptions = {
-  origin: [
-    'http://127.0.0.1:5500',
+// ===== CORS =====
+const allowedOrigins = [
+  'http://127.0.0.1:5500',
     'http://localhost:5500',
     process.env.CLIENT_URL
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+];
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.use(cors({
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps / curl)
+    if (!origin) return callback(null, true);
+
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') // allow all Vercel previews
+    ) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET','POST','PUT','PATCH','DELETE'],
+  allowedHeaders: ['Content-Type','Authorization'],
+  credentials: true
+}));
+
+app.use(cors()); // handles preflight automatically
 
 
 // ── SECURITY MIDDLEWARE ──────────────────────────────────
