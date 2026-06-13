@@ -12,7 +12,7 @@
     "@sendgrid/mail": "^8.1.6",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.2",
     "express-mongo-sanitize": "^2.2.0",
