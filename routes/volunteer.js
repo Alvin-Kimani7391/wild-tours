@@ -9,6 +9,15 @@ const { protect, authorize, asyncHandler } = require('../middleware/auth');
 // PUBLIC PROGRAMS
 // ============================================================
 
+router.get('/test', (req, res) => {
+  res.json({ success: true });
+});
+
+router.post('/test', (req, res) => {
+  res.json({ success: true, method: 'POST' });
+});
+
+
 // GET all volunteer programs
 router.get('/', asyncHandler(async (req, res) => {
   const { country, category, featured } = req.query;
