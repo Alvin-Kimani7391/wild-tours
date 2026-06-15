@@ -46,37 +46,43 @@ router.get('/admin/programs', protect, authorize('admin', 'staff'), asyncHandler
 }));
 
 // Create program
+// POST /admin/program
 router.post('/admin/program', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
-  const program = await VolunteerProgram.create({
-    ...req.body,
-    createdBy: req.user._id
-  });
+  const body = { ...req.body, createdBy: req.user._id };
 
-  res.status(201).json({
-    success: true,
-    program
-  });
+  // Remap accommodation.type → accommodation.kind
+  if (body.accommodation?.type) {
+    body.accommodation = {
+      ...body.accommodation,
+      kind: body.accommodation.type,
+    };
+    delete body.accommodation.type;
+  }
+
+  const program = await VolunteerProgram.create(body);
+  res.status(201).json({ success: true, program });
 }));
 
-// Update program
+// PUT /admin/program/:id  
 router.put('/admin/program/:id', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
+  const body = { ...req.body };
+
+  if (body.accommodation?.type) {
+    body.accommodation = {
+      ...body.accommodation,
+      kind: body.accommodation.type,
+    };
+    delete body.accommodation.type;
+  }
+
   const program = await VolunteerProgram.findByIdAndUpdate(
     req.params.id,
-    req.body,
+    body,
     { new: true, runValidators: true }
   );
 
-  if (!program) {
-    return res.status(404).json({
-      success: false,
-      message: 'Program not found'
-    });
-  }
-
-  res.json({
-    success: true,
-    program
-  });
+  if (!program) return res.status(404).json({ success: false, message: 'Program not found' });
+  res.json({ success: true, program });
 }));
 
 // Delete program

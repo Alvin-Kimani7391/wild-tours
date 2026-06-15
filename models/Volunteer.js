@@ -27,10 +27,10 @@ const VolunteerProgramSchema = new mongoose.Schema({
   skills:           [String],
 
   accommodation: {
-    type:        String, // 'host-family', 'shared-house', 'bush-camp'
-    description: String,
-    amenities:   [String],
-  },
+  kind:        { type: String },   // 'host-family', 'shared-house', 'bush-camp'
+  description: { type: String },
+  amenities:   [String],
+},
 
   meals:       { type: String }, // 'full-board', 'half-board', 'self-catering'
   languages:   [String],
