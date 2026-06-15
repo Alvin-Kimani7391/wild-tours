@@ -37,6 +37,26 @@ tourRouter.get('/', asyncHandler(async (req, res) => {
   res.json({ success: true, count: tours.length, total, pages: Math.ceil(total / limit), tours });
 }));
 
+
+// ADMIN: Get all tours
+tourRouter.get(
+  '/admin/tours',
+  protect,
+  authorize('admin', 'staff'),
+  asyncHandler(async (req, res) => {
+
+    const tours = await Tour.find()
+      .sort('-createdAt');
+
+    res.json({
+      success: true,
+      total: tours.length,
+      tours
+    });
+  })
+);
+
+
 // GET single tour
 tourRouter.get('/:slug', asyncHandler(async (req, res) => {
   const tour = await Tour.findOne({ slug: req.params.slug, isActive: true })
