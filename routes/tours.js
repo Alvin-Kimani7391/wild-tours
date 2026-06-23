@@ -37,6 +37,26 @@ tourRouter.get('/', asyncHandler(async (req, res) => {
   res.json({ success: true, count: tours.length, total, pages: Math.ceil(total / limit), tours });
 }));
 
+tourRouter.get('/:identifier', asyncHandler(async (req, res) => {
+  const { identifier } = req.params;
+
+  // Check if it looks like a MongoDB ObjectId
+  const isId = /^[a-f\d]{24}$/i.test(identifier);
+
+  const tour = await Tour.findOne(
+    isId ? { _id: identifier, isActive: true }
+         : { slug: identifier, isActive: true }
+  ).populate({ 
+    path: 'reviews', 
+    match: { isApproved: true },
+    select: 'rating title body user createdAt',
+    populate: { path: 'user', select: 'firstName lastName avatar' }
+  });
+
+  if (!tour) return res.status(404).json({ success: false, message: 'Tour not found.' });
+  res.json({ success: true, tour });
+}));
+
 
 // ADMIN: Get all tours
 tourRouter.get(
