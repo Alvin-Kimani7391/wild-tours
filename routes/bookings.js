@@ -3,7 +3,7 @@ const router = express.Router();
 const Booking = require('../models/Booking');
 const Tour = require('../models/Tour');
 const { protect, authorize, asyncHandler } = require('../middleware/auth');
-const { sendEmail } = require('../utils/email');
+const { sendEmail, emails } = require('../utils/emailService');
 const { upload, uploadToCloudinary } = require('../config/cloudinary');
 
 // ── POST /api/bookings ─ Create Booking ──────────────────
@@ -57,42 +57,34 @@ router.post('/', protect, asyncHandler(async (req, res) => {
     .populate('user', 'firstName lastName email phone');
 
   // Send confirmation email
-  try {
-    await sendEmail({
-      to: req.user.email,
-      subject: `✅ Booking Received - ${tour.title} [${fullBooking.bookingRef}]`,
-      template: 'bookingConfirmation',
-      data: {
-        name: req.user.firstName,
-        bookingRef: fullBooking.bookingRef,
-        tourName: tour.title,
-        startDate: new Date(startDate).toDateString(),
-        travelers: numberOfTravelers,
-        totalAmount,
-        depositAmount,
-        currency: tour.currency,
-        paymentMethod,
-        bankDetails: bankTransferDetails,
-      }
-    });
+ // Send confirmation email (MODERN SYSTEM)
+try {
+  const emailData = emails.booking(fullBooking, req.user);
 
-    // Notify admin
-    await sendEmail({
-      to: process.env.ADMIN_EMAIL,
-      subject: `🔔 New Booking: ${fullBooking.bookingRef} - ${tour.title}`,
-      template: 'adminBookingAlert',
-      data: {
-        bookingRef: fullBooking.bookingRef,
-        customerName: `${req.user.firstName} ${req.user.lastName}`,
-        customerEmail: req.user.email,
-        tourName: tour.title,
-        startDate: new Date(startDate).toDateString(),
-        travelers: numberOfTravelers,
-        totalAmount,
-        paymentMethod,
-      }
-    });
-  } catch (e) { console.error('Booking email failed:', e.message); }
+  await sendEmail({
+    to: req.user.email,
+    subject: emailData.subject,
+    html: emailData.html
+  });
+
+  // Admin notification (MODERN)
+  await sendEmail({
+    to: process.env.ADMIN_EMAIL,
+    subject: `🔔 New Booking: ${fullBooking.bookingRef} - ${tour.title}`,
+    html: `
+      <h2>New Booking Alert</h2>
+      <p><strong>Ref:</strong> ${fullBooking.bookingRef}</p>
+      <p><strong>Customer:</strong> ${req.user.firstName} ${req.user.lastName}</p>
+      <p><strong>Email:</strong> ${req.user.email}</p>
+      <p><strong>Tour:</strong> ${tour.title}</p>
+      <p><strong>Travelers:</strong> ${numberOfTravelers}</p>
+      <p><strong>Total:</strong> ${totalAmount}</p>
+    `
+  });
+
+} catch (e) {
+  console.error('Booking email failed:', e.message);
+}
 
   res.status(201).json({
     success: true,
@@ -164,16 +156,16 @@ router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(a
   // Notify admin
   try {
     await sendEmail({
-      to: process.env.ADMIN_EMAIL,
-      subject: `💳 Payment Proof Uploaded - ${booking.bookingRef}`,
-      template: 'paymentProofAlert',
-      data: {
-        bookingRef: booking.bookingRef,
-        customerName: `${req.user.firstName} ${req.user.lastName}`,
-        proofUrl: result.secure_url,
-        amount: paymentRecord.amount,
-      }
-    });
+  to: process.env.ADMIN_EMAIL,
+  subject: `💳 Payment Proof Uploaded - ${booking.bookingRef}`,
+  html: `
+    <h2>Payment Proof Uploaded</h2>
+    <p><strong>Booking:</strong> ${booking.bookingRef}</p>
+    <p><strong>Customer:</strong> ${req.user.firstName} ${req.user.lastName}</p>
+    <p><strong>Amount:</strong> ${paymentRecord.amount}</p>
+    <a href="${result.secure_url}" target="_blank">View Proof</a>
+  `
+});
   } catch (e) { /* non-critical */ }
 
   res.json({ success: true, message: 'Payment proof uploaded. Admin will verify within 24 hours.', booking });
@@ -198,11 +190,15 @@ router.put('/:id/cancel', protect, asyncHandler(async (req, res) => {
 
   try {
     await sendEmail({
-      to: req.user.email,
-      subject: `Booking Cancelled - ${booking.bookingRef}`,
-      template: 'bookingCancelled',
-      data: { name: req.user.firstName, bookingRef: booking.bookingRef, tourName: booking.tour.title }
-    });
+  to: req.user.email,
+  subject: `Booking Cancelled - ${booking.bookingRef}`,
+  html: `
+    <h2>Booking Cancelled</h2>
+    <p>Hi ${req.user.firstName},</p>
+    <p>Your booking <strong>${booking.bookingRef}</strong> has been cancelled.</p>
+    <p>Tour: ${booking.tour.title}</p>
+  `
+});
   } catch (e) { /* non-critical */ }
 
   res.json({ success: true, message: 'Booking cancelled successfully.', booking });
@@ -252,16 +248,16 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
   if (status && status !== prevStatus) {
     try {
       await sendEmail({
-        to: booking.user.email,
-        subject: `Booking ${status.charAt(0).toUpperCase() + status.slice(1)} - ${booking.bookingRef}`,
-        template: 'bookingStatusUpdate',
-        data: {
-          name: booking.user.firstName,
-          bookingRef: booking.bookingRef,
-          tourName: booking.tour.title,
-          status, notes: internalNotes
-        }
-      });
+  to: booking.user.email,
+  subject: `Booking ${status} - ${booking.bookingRef}`,
+  html: `
+    <h2>Booking Update</h2>
+    <p>Hi ${booking.user.firstName},</p>
+    <p>Your booking is now: <strong>${status}</strong></p>
+    <p>Tour: ${booking.tour.title}</p>
+    ${internalNotes ? `<p>Note: ${internalNotes}</p>` : ''}
+  `
+});
     } catch (e) { /* non-critical */ }
   }
 
@@ -293,16 +289,15 @@ router.put('/:id/verify-payment', protect, authorize('admin'), asyncHandler(asyn
   if (verified) {
     try {
       await sendEmail({
-        to: booking.user.email,
-        subject: `✅ Payment Confirmed - ${booking.bookingRef}`,
-        template: 'paymentConfirmed',
-        data: {
-          name: booking.user.firstName,
-          bookingRef: booking.bookingRef,
-          tourName: booking.tour.title,
-          amount: payment.amount,
-        }
-      });
+  to: booking.user.email,
+  subject: `Payment Confirmed - ${booking.bookingRef}`,
+  html: `
+    <h2>Payment Confirmed ✅</h2>
+    <p>Hi ${booking.user.firstName},</p>
+    <p>We received your payment for <strong>${booking.tour.title}</strong>.</p>
+    <p>Amount: ${payment.amount}</p>
+  `
+});
     } catch (e) { /* non-critical */ }
   }
 

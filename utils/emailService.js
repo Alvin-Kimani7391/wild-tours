@@ -148,19 +148,30 @@ const emails = {
   }),
 
   // 💳 PASSWORD RESET (UPGRADED SECURITY EMAIL)
-  passwordReset: (user, resetUrl) => ({
-    subject: 'Password Reset Request 🔐',
-    html: buildEmail({
-      title: 'Reset Your Password',
-      content: `
-        <p>Hi ${user.firstName},</p>
-        <p>We received a request to reset your password.</p>
-        <p>This link expires in 30 minutes for security reasons.</p>
-      `,
-      ctaText: 'Reset Password',
-      ctaLink: resetUrl
-    })
-  }),
+  // 🔐 PASSWORD RESET EMAIL
+passwordReset: (user, resetUrl) => ({
+  subject: 'Reset Your Osimlai Adventuress Password 🔐',
+  html: buildEmail({
+    title: 'Password Reset Request',
+    content: `
+      <p>Hi <strong>${user.firstName}</strong>,</p>
+
+      <p>We received a request to reset your password.</p>
+
+      <p>If this was you, click the button below:</p>
+
+      <p>If you did NOT request this, you can safely ignore this email.</p>
+
+      <div style="background:#f7f7f7;padding:16px;border-radius:12px;margin:16px 0;">
+        <p style="font-size:13px;color:#666;">
+          This link will expire in 30 minutes for security reasons.
+        </p>
+      </div>
+    `,
+    ctaText: 'Reset Password',
+    ctaLink: resetUrl
+  })
+}),
 
   // 📩 CONTACT AUTO REPLY
   contact: (name) => ({
@@ -175,32 +186,48 @@ const emails = {
   }),
 
   // 🐘 VOLUNTEER USER
-  volunteerUser: (user, program) => ({
-    subject: 'Volunteer Application Received 🌿',
-    html: buildEmail({
-      title: 'Application Received',
-      content: `
-        <p>Hi ${user.firstName}, we received your application for:</p>
-        <p><strong>${program}</strong></p>
-      `
-    })
-  }),
+  volunteerReceived: (user, programName) => ({
+  subject: `🌿 Application Received - ${programName}`,
+  html: buildEmail({
+    title: 'Application Received',
+    content: `
+      <p>Hi <strong>${user.firstName}</strong>,</p>
+      <p>Your application for <strong>${programName}</strong> has been received successfully.</p>
+      <p>We will review it and get back to you within 48 hours.</p>
+    `
+  })
+}),
 
   // 👨‍💼 VOLUNTEER ADMIN
-  volunteerAdmin: (user, program) => ({
-    subject: 'NEW VOLUNTEER APPLICATION 🚨',
-    html: buildEmail({
-      title: 'New Application',
-      content: `
-        <p><strong>Name:</strong> ${user.firstName} ${user.lastName}</p>
-        <p><strong>Email:</strong> ${user.email}</p>
-        <p><strong>Program:</strong> ${program}</p>
-      `,
-      ctaText: 'Review Application',
-      ctaLink: `${BRAND.website}/admin/volunteers.html`
-    })
+  volunteerAdminAlert: (user, program, ref) => ({
+  subject: `🔔 New Volunteer Application: ${ref}`,
+  html: buildEmail({
+    title: 'New Volunteer Application',
+    content: `
+      <p><strong>Applicant:</strong> ${user.firstName} ${user.lastName}</p>
+      <p><strong>Email:</strong> ${user.email}</p>
+      <p><strong>Program:</strong> ${program.title}</p>
+      <p><strong>Reference:</strong> ${ref}</p>
+    `
   })
-};
+}),
+
+volunteerStatusUpdate: (user, programName, status, ref, notes, rejection) => ({
+  subject: `Application ${status} - ${programName}`,
+  html: buildEmail({
+    title: `Application ${status}`,
+    content: `
+      <p>Hi <strong>${user.firstName}</strong>,</p>
+      <p>Your application for <strong>${programName}</strong> has been <strong>${status}</strong>.</p>
+
+      <p><strong>Reference:</strong> ${ref}</p>
+
+      ${notes ? `<p><strong>Notes:</strong> ${notes}</p>` : ''}
+      ${rejection ? `<p><strong>Reason:</strong> ${rejection}</p>` : ''}
+    `
+  })
+})
+}; // ✅ THIS WAS MISSING
 
 module.exports = {
   sendEmail,

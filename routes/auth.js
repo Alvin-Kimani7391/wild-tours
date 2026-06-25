@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const { protect, asyncHandler, AppError } = require('../middleware/auth');
-const { sendEmail } = require('../utils/email');
+const { sendEmail, emails } = require('../utils/emailService');
 
 // Helper: send token response
 const sendTokenResponse = (user, statusCode, res) => {
@@ -46,17 +46,28 @@ router.post('/register', [
     return res.status(400).json({ success: false, message: 'An account with this email already exists.' });
   }
 
-  const user = await User.create({ firstName, lastName, email, password, phone, nationality });
+  const user = await User.create({
+  firstName,
+  lastName,
+  email,
+  password,
+  phone,
+  nationality
+});
 
-  // Send welcome email
-  try {
-    await sendEmail({
-      to: user.email,
-      subject: '🌿 Welcome to WildRoots Africa!',
-      template: 'welcome',
-      data: { name: user.firstName }
-    });
-  } catch (e) { console.error('Welcome email failed:', e.message); }
+// 🌿 Send welcome email (MODERN SYSTEM)
+try {
+  const emailData = emails.welcome(user);
+
+  await sendEmail({
+    to: user.email,
+    subject: emailData.subject,
+    html: emailData.html
+  });
+
+} catch (e) {
+  console.error('Welcome email failed:', e.message);
+}
 
   sendTokenResponse(user, 201, res);
 }));
@@ -93,35 +104,64 @@ router.get('/me', protect, asyncHandler(async (req, res) => {
 }));
 
 // ── POST /api/auth/forgot-password ──────────────────────
-router.post('/forgot-password', [
-  body('email').isEmail().normalizeEmail()
-], asyncHandler(async (req, res) => {
-  const user = await User.findOne({ email: req.body.email });
-  if (!user) {
-    // Don't reveal whether email exists
-    return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
-  }
+router.post(
+  '/forgot-password',
+  [
+    body('email').isEmail().normalizeEmail()
+  ],
+  asyncHandler(async (req, res) => {
 
-  const resetToken = user.getResetPasswordToken();
-  await user.save({ validateBeforeSave: false });
+    const user = await User.findOne({ email: req.body.email });
 
-  const resetUrl = `${process.env.CLIENT_URL}/reset-password.html?token=${resetToken}`;
+    // NEVER reveal if user exists
+    if (!user) {
+      return res.json({
+        success: true,
+        message: 'If that email exists, a reset link has been sent.'
+      });
+    }
 
-  try {
-    await sendEmail({
-      to: user.email,
-      subject: 'WildRoots Africa - Password Reset Request',
-      template: 'passwordReset',
-      data: { name: user.firstName, resetUrl }
-    });
-    res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
-  } catch (e) {
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
+    // 1. Generate reset token
+    const resetToken = user.getResetPasswordToken();
     await user.save({ validateBeforeSave: false });
-    return res.status(500).json({ success: false, message: 'Email could not be sent. Try again.' });
-  }
-}));
+
+    // 2. Create reset URL
+    const resetUrl = `${process.env.CLIENT_URL}/reset-password.html?token=${resetToken}`;
+
+    try {
+
+      // 3. SEND MODERN EMAIL (YOUR EMAIL SERVICE)
+      const { sendEmail, emails } = require('../utils/emailService');
+
+      const emailData = emails.passwordReset(user, resetUrl);
+
+      await sendEmail({
+        to: user.email,
+        subject: emailData.subject,
+        html: emailData.html
+      });
+
+      return res.json({
+        success: true,
+        message: 'If that email exists, a reset link has been sent.'
+      });
+
+    } catch (e) {
+
+      // rollback token if email fails
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save({ validateBeforeSave: false });
+
+      console.error('Password reset email failed:', e.message);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Email could not be sent. Try again.'
+      });
+    }
+  })
+);
 
 // ── PUT /api/auth/reset-password/:token ─────────────────
 router.put('/reset-password/:token', [

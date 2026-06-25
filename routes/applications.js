@@ -3,7 +3,7 @@ const router = express.Router();
 const { protect, authorize, asyncHandler } = require('../middleware/auth');
 const { Application, VolunteerProgram } = require('../models/Volunteer');
 const { upload, uploadToCloudinary } = require('../config/cloudinary');
-const { sendEmail } = require('../utils/email');
+const { sendEmail, emails } = require('../utils/emailService');
 
 // POST /api/applications — authenticated user submits application
 router.post(
@@ -82,31 +82,32 @@ router.post(
     await application.populate('program', 'title country location duration programFee');
 
     // Confirmation emails (non-blocking)
-    try {
-      await sendEmail({
-        to: req.user.email,
-        subject: `🌿 Application Received – ${program.title} [${application.applicationRef}]`,
-        template: 'applicationConfirmation',
-        data: {
-          name: req.user.firstName,
-          appRef: application.applicationRef,
-          programName: program.title,
-          country: program.country,
-        },
-      });
-      await sendEmail({
-        to: process.env.ADMIN_EMAIL,
-        subject: `🔔 New Volunteer Application: ${application.applicationRef}`,
-        template: 'adminApplicationAlert',
-        data: {
-          appRef: application.applicationRef,
-          applicantName: `${req.user.firstName} ${req.user.lastName}`,
-          programName: program.title,
-        },
-      });
-    } catch (e) {
-      console.error('Application email error:', e.message);
-    }
+    // 🌿 USER CONFIRMATION EMAIL
+try {
+  const userEmail = emails.volunteerReceived(req.user, program.title);
+
+  await sendEmail({
+    to: req.user.email,
+    subject: userEmail.subject,
+    html: userEmail.html,
+  });
+
+  // 🔔 ADMIN ALERT EMAIL
+  const adminEmail = emails.volunteerAdminAlert(
+    req.user,
+    program,
+    application.applicationRef
+  );
+
+  await sendEmail({
+    to: process.env.ADMIN_EMAIL,
+    subject: adminEmail.subject,
+    html: adminEmail.html,
+  });
+
+} catch (e) {
+  console.error('Application email error:', e.message);
+}
 
     res.status(201).json({
       success: true,
@@ -188,25 +189,24 @@ router.put(
 
     // Status notification email (non-blocking)
     try {
-      const subject =
-        status === 'approved' ? `🎉 Application Approved – ${app.program.title}` :
-        status === 'rejected' ? `Application Update – ${app.program.title}` :
-        `Application Status Update – ${app.applicationRef}`;
+  const statusEmail = emails.volunteerStatusUpdate(
+    app.user,
+    app.program.title,
+    status,
+    app.applicationRef,
+    reviewNotes,
+    rejectionReason
+  );
 
-      await sendEmail({
-        to: app.user.email,
-        subject,
-        template: 'applicationStatusUpdate',
-        data: {
-          name: app.user.firstName,
-          status,
-          programName: app.program.title,
-          appRef: app.applicationRef,
-          notes: reviewNotes,
-          rejectionReason,
-        },
-      });
-    } catch (e) { /* non-critical */ }
+  await sendEmail({
+    to: app.user.email,
+    subject: statusEmail.subject,
+    html: statusEmail.html,
+  });
+
+} catch (e) {
+  console.error('Status email failed:', e.message);
+}
 
     res.json({ success: true, message: `Application ${status}.`, application: app });
   })
