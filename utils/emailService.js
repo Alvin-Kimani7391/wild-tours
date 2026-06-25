@@ -110,42 +110,46 @@ const emails = {
   }),
 
   // 🧾 BOOKING USER
-  bookingUser: (booking, user) => ({
-    subject: 'Booking Confirmed 🐘',
-    html: buildEmail({
-      title: `Your Safari is Confirmed 🎉`,
-      content: `
-        <p>Hi <strong>${user.firstName}</strong>, your booking is confirmed.</p>
+  // 🧾 BOOKING USER (FIXED)
+bookingUser: (booking, user) => ({
+  subject: 'Booking Confirmed 🐘',
+  html: buildEmail({
+    title: `Your Safari is Confirmed 🎉`,
+    content: `
+      <p>Hi <strong>${user.firstName}</strong>, your booking is confirmed.</p>
 
-        <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
-          <p><strong>Tour:</strong> ${booking.tourName}</p>
-          <p><strong>Date:</strong> ${booking.startDate}</p>
-          <p><strong>Guests:</strong> ${booking.numberOfTravelers}</p>
-        </div>
-      `
-    })
-  }),
+      <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
+        <p><strong>Tour:</strong> ${booking.tour?.title || 'N/A'}</p>
+        <p><strong>Date:</strong> ${booking.startDate}</p>
+        <p><strong>Guests:</strong> ${booking.numberOfTravelers}</p>
+        <p><strong>Booking Ref:</strong> ${booking.bookingRef}</p>
+      </div>
+    `
+  })
+}),
 
   // 👨‍💼 BOOKING ADMIN
-  bookingAdmin: (booking, user) => ({
-    subject: `NEW BOOKING ALERT 🚨`,
-    html: buildEmail({
-      title: `New Booking Received`,
-      content: `
-        <p><strong>User:</strong> ${user.firstName} ${user.lastName}</p>
-        <p><strong>Email:</strong> ${user.email}</p>
+  // 👨‍💼 BOOKING ADMIN (FIXED)
+bookingAdmin: (booking, user) => ({
+  subject: `NEW BOOKING ALERT 🚨`,
+  html: buildEmail({
+    title: `New Booking Received`,
+    content: `
+      <p><strong>User:</strong> ${user.firstName} ${user.lastName}</p>
+      <p><strong>Email:</strong> ${user.email}</p>
 
-        <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
-          <p><strong>Tour:</strong> ${booking.tourName}</p>
-          <p><strong>Date:</strong> ${booking.startDate}</p>
-          <p><strong>Guests:</strong> ${booking.numberOfTravelers}</p>
-          <p><strong>ID:</strong> ${booking._id}</p>
-        </div>
-      `,
-      ctaText: 'Open Admin Panel',
-      ctaLink: `${BRAND.website}/admin/bookings.html`
-    })
-  }),
+      <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
+        <p><strong>Tour:</strong> ${booking.tour?.title || 'N/A'}</p>
+        <p><strong>Date:</strong> ${booking.startDate}</p>
+        <p><strong>Guests:</strong> ${booking.numberOfTravelers}</p>
+        <p><strong>Ref:</strong> ${booking.bookingRef}</p>
+        <p><strong>Total:</strong> ${booking.totalAmount}</p>
+      </div>
+    `,
+    ctaText: 'Open Admin Panel',
+    ctaLink: `${BRAND.website}/admin/bookings.html`
+  })
+}),
 
   // 💳 PASSWORD RESET (UPGRADED SECURITY EMAIL)
   // 🔐 PASSWORD RESET EMAIL
