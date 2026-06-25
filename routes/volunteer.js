@@ -191,6 +191,7 @@ router.get('/:slug', asyncHandler(async (req, res) => {
 // ============================================================
 
 // Submit application
+// Submit application
 router.post('/apply', protect, asyncHandler(async (req, res) => {
   const {
     program, personalInfo, emergencyContact, programDetails,
@@ -206,11 +207,48 @@ router.post('/apply', protect, asyncHandler(async (req, res) => {
   const application = await Application.create({
     user: req.user._id,
     program,
-    personalInfo, emergencyContact, programDetails,
-    skills, experience, motivation, languages,
-    medicalConditions, dietaryRequirements, hasPassport,
+    personalInfo,
+    emergencyContact,
+    programDetails,
+    skills,
+    experience,
+    motivation,
+    languages,
+    medicalConditions,
+    dietaryRequirements,
+    hasPassport,
     programFeeAmount: existingProgram.programFee
   });
+
+  try {
+    // 👤 USER EMAIL
+    const userEmail = emails.volunteerReceived(
+      req.user,
+      existingProgram.title
+    );
+
+    await sendEmail({
+      to: req.user.email,
+      subject: userEmail.subject,
+      html: userEmail.html
+    });
+
+    // 👨‍💼 ADMIN EMAIL
+    const adminEmail = emails.volunteerAdminAlert(
+      req.user,
+      existingProgram,
+      application._id
+    );
+
+    await sendEmail({
+      to: process.env.ADMIN_EMAIL,
+      subject: adminEmail.subject,
+      html: adminEmail.html
+    });
+
+  } catch (err) {
+    console.error('Application email error:', err.message);
+  }
 
   res.status(201).json({
     success: true,
