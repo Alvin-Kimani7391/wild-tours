@@ -58,8 +58,9 @@ router.post('/', protect, asyncHandler(async (req, res) => {
 
   // Send confirmation email
  // Send confirmation email (MODERN SYSTEM)
+// Send confirmation email (MODERN SYSTEM)
 try {
-  const emailData = emails.booking(fullBooking, req.user);
+  const emailData = emails.bookingUser(fullBooking, req.user);
 
   await sendEmail({
     to: req.user.email,
@@ -68,22 +69,16 @@ try {
   });
 
   // Admin notification (MODERN)
+  const adminEmail = emails.bookingAdmin(fullBooking, req.user);
+
   await sendEmail({
     to: process.env.ADMIN_EMAIL,
-    subject: `🔔 New Booking: ${fullBooking.bookingRef} - ${tour.title}`,
-    html: `
-      <h2>New Booking Alert</h2>
-      <p><strong>Ref:</strong> ${fullBooking.bookingRef}</p>
-      <p><strong>Customer:</strong> ${req.user.firstName} ${req.user.lastName}</p>
-      <p><strong>Email:</strong> ${req.user.email}</p>
-      <p><strong>Tour:</strong> ${tour.title}</p>
-      <p><strong>Travelers:</strong> ${numberOfTravelers}</p>
-      <p><strong>Total:</strong> ${totalAmount}</p>
-    `
+    subject: adminEmail.subject,
+    html: adminEmail.html
   });
 
-} catch (e) {
-  console.error('Booking email failed:', e.message);
+} catch (err) {
+  console.error('Booking email failed:', err.message);
 }
 
   res.status(201).json({

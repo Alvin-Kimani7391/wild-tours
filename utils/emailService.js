@@ -177,6 +177,46 @@ passwordReset: (user, resetUrl) => ({
   })
 }),
 
+
+paymentConfirmed: (booking, user, amount) => ({
+  subject: `✅ Payment Verified — ${booking.bookingRef}`,
+  html: buildEmail({
+    title: 'Payment Confirmed 🎉',
+    content: `
+      <p>Hi <strong>${user.firstName}</strong>,</p>
+
+      <p>Your payment has been successfully verified.</p>
+
+      <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
+        <p><strong>Tour:</strong> ${booking.tour?.title}</p>
+        <p><strong>Booking Ref:</strong> ${booking.bookingRef}</p>
+        <p><strong>Amount Paid:</strong> ${amount}</p>
+      </div>
+
+      <p>Your safari is now fully confirmed.</p>
+    `
+  })
+}),
+
+paymentRejected: (booking, user) => ({
+  subject: `❌ Payment Rejected — ${booking.bookingRef}`,
+  html: buildEmail({
+    title: 'Payment Not Approved',
+    content: `
+      <p>Hi <strong>${user.firstName}</strong>,</p>
+
+      <p>Unfortunately, we could not verify your payment.</p>
+
+      <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
+        <p><strong>Booking Ref:</strong> ${booking.bookingRef}</p>
+        <p><strong>Tour:</strong> ${booking.tour?.title}</p>
+      </div>
+
+      <p>Please contact support or upload correct payment proof.</p>
+    `
+  })
+}),
+
   // 📩 CONTACT AUTO REPLY
   contact: (name) => ({
     subject: 'We received your message 📩',
@@ -212,6 +252,46 @@ passwordReset: (user, resetUrl) => ({
       <p><strong>Email:</strong> ${user.email}</p>
       <p><strong>Program:</strong> ${program.title}</p>
       <p><strong>Reference:</strong> ${ref}</p>
+    `
+  })
+}),
+
+bankReceiptAdminAlert: (booking, user, amount, receiptPath) => ({
+  subject: `🏦 Bank Receipt Uploaded — ${booking.bookingRef}`,
+  html: buildEmail({
+    title: 'New Bank Receipt Uploaded',
+    content: `
+      <p><strong>Customer:</strong> ${user.firstName}</p>
+      <p><strong>Email:</strong> ${user.email}</p>
+
+      <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
+        <p><strong>Booking Ref:</strong> ${booking.bookingRef}</p>
+        <p><strong>Tour:</strong> ${booking.tour?.title}</p>
+        <p><strong>Amount:</strong> ${amount}</p>
+        <p><strong>Receipt File:</strong> ${receiptPath}</p>
+      </div>
+    `,
+    ctaText: 'Open Admin Panel',
+    ctaLink: `${BRAND.website}/admin/bookings.html`
+  })
+}),
+
+bankReceiptReceived: (booking, user, amount) => ({
+  subject: `✅ Receipt Received — ${booking.bookingRef}`,
+  html: buildEmail({
+    title: 'Payment Proof Received 📩',
+    content: `
+      <p>Hi <strong>${user.firstName}</strong>,</p>
+
+      <p>We have successfully received your payment receipt.</p>
+
+      <div style="background:#f7f7f7;padding:16px;border-radius:12px;">
+        <p><strong>Booking Ref:</strong> ${booking.bookingRef}</p>
+        <p><strong>Tour:</strong> ${booking.tour?.title}</p>
+        <p><strong>Amount:</strong> ${amount}</p>
+      </div>
+
+      <p>Our team will verify your payment within 24 hours.</p>
     `
   })
 }),

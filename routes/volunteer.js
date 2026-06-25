@@ -257,6 +257,8 @@ router.post('/apply', protect, asyncHandler(async (req, res) => {
   });
 }));
 
+
+
 // My applications
 router.get('/my/applications', protect, asyncHandler(async (req, res) => {
   const applications = await Application.find({ user: req.user._id })

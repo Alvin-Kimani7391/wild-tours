@@ -6,6 +6,70 @@ const { Review } = require('../models/Review');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Tour = require('../models/Tour');
+const { sendEmail, emails } = require('../utils/emailService');
+
+// ── PATCH /api/admin/bookings/:id/verify-payment ──────────
+// ── PATCH /api/admin/bookings/:id/verify-payment ──────────
+router.patch('/bookings/:id/verify-payment', protect, adminOnly, asyncHandler(async (req, res) => {
+  const { approved } = req.body; // true or false
+
+  const booking = await Booking.findById(req.params.id)
+    .populate('user', 'firstName email')
+    .populate('tour', 'title');
+
+  if (!booking) {
+    return res.status(404).json({ success: false, message: 'Booking not found.' });
+  }
+
+  const payment = booking.payments.find(p => p.status === 'pending_verification');
+  if (!payment) {
+    return res.status(400).json({ success: false, message: 'No pending payment found.' });
+  }
+
+  try {
+
+    if (approved) {
+      payment.status = 'completed';
+      booking.paymentStatus =
+        payment.amount >= booking.totalAmount ? 'fully_paid' : 'deposit_paid';
+
+      booking.status = 'confirmed';
+
+      // 👤 USER EMAIL (APPROVED)
+      const emailData = emails.paymentConfirmed(booking, booking.user, payment.amount);
+
+      await sendEmail({
+        to: booking.user.email,
+        subject: emailData.subject,
+        html: emailData.html
+      });
+
+    } else {
+      payment.status = 'failed';
+      booking.paymentStatus = 'unpaid';
+
+      // 👤 USER EMAIL (REJECTED)
+      const emailData = emails.paymentRejected(booking, booking.user);
+
+      await sendEmail({
+        to: booking.user.email,
+        subject: emailData.subject,
+        html: emailData.html
+      });
+    }
+
+    await booking.save();
+
+    res.json({ success: true, booking });
+
+  } catch (err) {
+    console.error('Payment verification email error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Payment updated but email failed'
+    });
+  }
+}));
 
 // GET /api/dashboard/stats — admin/staff: full platform overview
 router.get(

@@ -4,7 +4,110 @@ const axios = require('axios');
 const { protect, asyncHandler } = require('../middleware/auth');
 const Booking = require('../models/Booking');
 const Application = require('../models/Volunteer').Application;
-const { sendEmail } = require('../utils/email');
+const { sendEmail, emails } = require('../utils/emailService');
+const multer  = require('multer');
+const path    = require('path');
+const fs      = require('fs');
+
+// ── Storage config ────────────────────────────────────────
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = 'uploads/receipts';
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `receipt-${Date.now()}-${req.user._id}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|pdf/;
+    const ok = allowed.test(path.extname(file.originalname).toLowerCase())
+            && allowed.test(file.mimetype);
+    ok ? cb(null, true) : cb(new Error('Only images and PDFs are allowed'));
+  }
+});
+
+// ── POST /api/payments/bank/upload-receipt ────────────────
+router.post('/bank/upload-receipt', protect, upload.single('receipt'), asyncHandler(async (req, res) => {
+  const { bookingId, amount } = req.body;
+
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'No receipt file uploaded.' });
+  }
+
+  const booking = await Booking.findById(bookingId).populate('user', 'firstName email').populate('tour', 'title');
+
+  if (!booking) {
+    return res.status(404).json({ success: false, message: 'Booking not found.' });
+  }
+
+  if (booking.user._id.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ success: false, message: 'Not authorized.' });
+  }
+
+  // Save payment record with receipt path
+ // Save payment record with receipt path
+booking.payments.push({
+  method: 'bank_transfer',
+  amount: Number(amount),
+  status: 'pending_verification',
+  reference: `BANK-${booking.bookingRef}`,
+  receiptPath: req.file.path,
+  paidAt: new Date(),
+});
+
+booking.paymentStatus = 'pending_verification';
+await booking.save();
+
+try {
+
+  // 👨‍💼 ADMIN EMAIL (receipt uploaded)
+  const adminEmail = emails.bankReceiptAdminAlert(
+    booking,
+    booking.user,
+    amount,
+    req.file.path
+  );
+
+  await sendEmail({
+    to: process.env.ADMIN_EMAIL,
+    subject: adminEmail.subject,
+    html: adminEmail.html
+  });
+
+  // 👤 USER EMAIL (confirmation received)
+  const userEmail = emails.bankReceiptReceived(
+    booking,
+    booking.user,
+    amount
+  );
+
+  await sendEmail({
+    to: booking.user.email,
+    subject: userEmail.subject,
+    html: userEmail.html
+  });
+
+} catch (err) {
+  console.error('Receipt email error:', err.message);
+}
+
+res.json({
+  success: true,
+  message: 'Receipt uploaded successfully. Admin will verify within 24 hours.',
+  bookingRef: booking.bookingRef,
+});
+}));
+
+
+
+
 
 // ── M-PESA HELPERS ───────────────────────────────────────
 const getMpesaToken = async () => {
