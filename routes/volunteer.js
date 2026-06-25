@@ -3,7 +3,7 @@ const router = express.Router();
 
 const { VolunteerProgram, Application } = require('../models/Volunteer');
 const { protect, authorize, asyncHandler } = require('../middleware/auth');
-
+const { sendEmail, emails } = require('../utils/emailService');
 
 // ============================================================
 // TEST ROUTES
@@ -17,16 +17,13 @@ router.post('/test', (req, res) => {
   res.json({ success: true, method: 'POST' });
 });
 
-
 // ============================================================
 // ADMIN ROUTES  (must come BEFORE /:slug to avoid slug conflict)
 // ============================================================
 
-// GET all programs (admin — includes inactive/drafts)
 router.get('/admin/programs', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
   const { country, category, page = 1, limit = 50 } = req.query;
-
-  const query = {};  // No isActive filter — admins see everything
+  const query = {};
   if (country)  query.country  = new RegExp(country, 'i');
   if (category) query.category = category;
 
@@ -36,62 +33,35 @@ router.get('/admin/programs', protect, authorize('admin', 'staff'), asyncHandler
     .limit(parseInt(limit));
 
   const total = await VolunteerProgram.countDocuments(query);
-
-  res.json({
-    success: true,
-    count: programs.length,
-    total,
-    programs
-  });
+  res.json({ success: true, count: programs.length, total, programs });
 }));
 
-// Create program
-// POST /admin/program
 router.post('/admin/program', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
   const body = { ...req.body, createdBy: req.user._id };
-
-  // Remap accommodation.type → accommodation.kind
   if (body.accommodation?.type) {
-    body.accommodation = {
-      ...body.accommodation,
-      kind: body.accommodation.type,
-    };
+    body.accommodation = { ...body.accommodation, kind: body.accommodation.type };
     delete body.accommodation.type;
   }
-
   const program = await VolunteerProgram.create(body);
   res.status(201).json({ success: true, program });
 }));
 
-// PUT /admin/program/:id  
 router.put('/admin/program/:id', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
   const body = { ...req.body };
-
   if (body.accommodation?.type) {
-    body.accommodation = {
-      ...body.accommodation,
-      kind: body.accommodation.type,
-    };
+    body.accommodation = { ...body.accommodation, kind: body.accommodation.type };
     delete body.accommodation.type;
   }
-
-  const program = await VolunteerProgram.findByIdAndUpdate(
-    req.params.id,
-    body,
-    { new: true, runValidators: true }
-  );
-
+  const program = await VolunteerProgram.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true });
   if (!program) return res.status(404).json({ success: false, message: 'Program not found' });
   res.json({ success: true, program });
 }));
 
-// Delete program
 router.delete('/admin/program/:id', protect, authorize('admin'), asyncHandler(async (req, res) => {
   await VolunteerProgram.findByIdAndDelete(req.params.id);
   res.json({ success: true, message: 'Program deleted.' });
 }));
 
-// Get all applications (admin)
 router.get('/admin/applications', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
   const { status, page = 1, limit = 20 } = req.query;
   const query = {};
@@ -105,48 +75,56 @@ router.get('/admin/applications', protect, authorize('admin', 'staff'), asyncHan
     .limit(parseInt(limit));
 
   const total = await Application.countDocuments(query);
-
-  res.json({
-    success: true,
-    count: applications.length,
-    total,
-    applications
-  });
+  res.json({ success: true, count: applications.length, total, applications });
 }));
 
-// Update application status (admin)
+// ── Update application status + send email to applicant ──
 router.patch('/admin/applications/:id/status', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
-  const application = await Application.findById(req.params.id);
+  const { status, reviewNotes, rejectionReason } = req.body;
+
+  const application = await Application.findById(req.params.id)
+    .populate('user', 'firstName lastName email')
+    .populate('program', 'title');
 
   if (!application) {
-    return res.status(404).json({
-      success: false,
-      message: 'Application not found'
-    });
+    return res.status(404).json({ success: false, message: 'Application not found' });
   }
 
-  application.status      = req.body.status;
-  application.reviewNotes = req.body.reviewNotes;
+  application.status      = status;
+  application.reviewNotes = reviewNotes;
   application.reviewedBy  = req.user._id;
   application.reviewedAt  = new Date();
-
   await application.save();
 
-  res.json({
-    success: true,
-    application
-  });
-}));
+  // Notify the applicant of status change
+  try {
+    const statusEmail = emails.volunteerStatusUpdate(
+      application.user,
+      application.program.title,
+      status,
+      application._id,
+      reviewNotes,
+      rejectionReason
+    );
 
+    await sendEmail({
+      to: application.user.email,
+      subject: statusEmail.subject,
+      html: statusEmail.html
+    });
+  } catch (err) {
+    console.error('Status update email error:', err.message);
+  }
+
+  res.json({ success: true, application });
+}));
 
 // ============================================================
 // PUBLIC ROUTES
 // ============================================================
 
-// GET all volunteer programs (public — active only)
 router.get('/', asyncHandler(async (req, res) => {
   const { country, category, featured, page = 1, limit = 12 } = req.query;
-
   const query = { isActive: true };
   if (country)             query.country  = new RegExp(country, 'i');
   if (category)            query.category = category;
@@ -159,39 +137,21 @@ router.get('/', asyncHandler(async (req, res) => {
     .limit(parseInt(limit));
 
   const total = await VolunteerProgram.countDocuments(query);
-
-  res.json({
-    success: true,
-    count: programs.length,
-    total,
-    programs
-  });
+  res.json({ success: true, count: programs.length, total, programs });
 }));
 
-// GET single program by slug (public)
 router.get('/:slug', asyncHandler(async (req, res) => {
-  const program = await VolunteerProgram.findOne({
-    slug: req.params.slug,
-    isActive: true
-  });
-
+  const program = await VolunteerProgram.findOne({ slug: req.params.slug, isActive: true });
   if (!program) {
-    return res.status(404).json({
-      success: false,
-      message: 'Program not found'
-    });
+    return res.status(404).json({ success: false, message: 'Program not found' });
   }
-
   res.json({ success: true, program });
 }));
-
 
 // ============================================================
 // USER ROUTES (authenticated)
 // ============================================================
 
-// Submit application
-// Submit application
 router.post('/apply', protect, asyncHandler(async (req, res) => {
   const {
     program, personalInfo, emergencyContact, programDetails,
@@ -221,25 +181,16 @@ router.post('/apply', protect, asyncHandler(async (req, res) => {
   });
 
   try {
-    // 👤 USER EMAIL
-    const userEmail = emails.volunteerReceived(
-      req.user,
-      existingProgram.title
-    );
-
+    // 👤 User confirmation email
+    const userEmail = emails.volunteerReceived(req.user, existingProgram.title);
     await sendEmail({
       to: req.user.email,
       subject: userEmail.subject,
       html: userEmail.html
     });
 
-    // 👨‍💼 ADMIN EMAIL
-    const adminEmail = emails.volunteerAdminAlert(
-      req.user,
-      existingProgram,
-      application._id
-    );
-
+    // 👨‍💼 Admin alert email
+    const adminEmail = emails.volunteerAdminAlert(req.user, existingProgram, application._id);
     await sendEmail({
       to: process.env.ADMIN_EMAIL,
       subject: adminEmail.subject,
@@ -257,20 +208,12 @@ router.post('/apply', protect, asyncHandler(async (req, res) => {
   });
 }));
 
-
-
-// My applications
 router.get('/my/applications', protect, asyncHandler(async (req, res) => {
   const applications = await Application.find({ user: req.user._id })
     .populate('program', 'title country location')
     .sort('-createdAt');
 
-  res.json({
-    success: true,
-    count: applications.length,
-    applications
-  });
+  res.json({ success: true, count: applications.length, applications });
 }));
-
 
 module.exports = router;

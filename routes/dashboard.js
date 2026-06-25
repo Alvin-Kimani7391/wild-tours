@@ -10,7 +10,11 @@ const { sendEmail, emails } = require('../utils/emailService');
 
 // ── PATCH /api/admin/bookings/:id/verify-payment ──────────
 // ── PATCH /api/admin/bookings/:id/verify-payment ──────────
-router.patch('/bookings/:id/verify-payment', protect, adminOnly, asyncHandler(async (req, res) => {
+router.patch(
+  '/bookings/:id/verify-payment',
+  protect,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
   const { approved } = req.body; // true or false
 
   const booking = await Booking.findById(req.params.id)
