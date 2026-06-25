@@ -251,59 +251,46 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
 }));
 
 // ── ADMIN: Verify bank transfer payment ───────────────────
-router.put('/:id/verify-payment', protect, authorize('admin'), asyncHandler(async (req, res) => {
+// ── PATCH /api/admin/bookings/:id/verify-payment ──────────
+// ── ADMIN: Verify bank transfer payment ───────────────────
+router.patch('/:id/verify-payment', protect, authorize('admin'), asyncHandler(async (req, res) => {
+  const { approved } = req.body;
+
   const booking = await Booking.findById(req.params.id)
-    .populate('user', 'firstName lastName email')
+    .populate('user', 'firstName email')
     .populate('tour', 'title');
 
-  if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
-
-  const { approved, notes } = req.body;
-
-  // Find the pending_verification payment record
-  const payment = booking.payments.find(p => p.status === 'pending_verification');
-  if (!payment) return res.status(400).json({ success: false, message: 'No pending payment found.' });
-
-  if (approved) {
-    payment.status        = 'completed';
-    payment.paidAt        = new Date();
-    booking.paymentStatus = payment.amount >= booking.totalAmount ? 'fully_paid' : 'deposit_paid';
-    booking.status        = 'confirmed';
-
-    if (booking.bankTransferDetails) {
-      booking.bankTransferDetails.verifiedBy = req.user._id;
-      booking.bankTransferDetails.verifiedAt = new Date();
-    }
-
-    // ── Email: approved ───────────────────────────────────
-    try {
-      const emailData = emails.paymentConfirmed(booking, booking.user, payment.amount);
-      await sendEmail({ to: booking.user.email, subject: emailData.subject, html: emailData.html });
-    } catch (e) {
-      console.error('Verify payment email error:', e.message);
-    }
-
-  } else {
-    payment.status        = 'failed';
-    booking.paymentStatus = 'unpaid';
-
-    // ── Email: rejected ───────────────────────────────────
-    try {
-      const emailData = emails.paymentRejected(booking, booking.user);
-      await sendEmail({ to: booking.user.email, subject: emailData.subject, html: emailData.html });
-    } catch (e) {
-      console.error('Reject payment email error:', e.message);
-    }
+  if (!booking) {
+    return res.status(404).json({ success: false, message: 'Booking not found.' });
   }
 
-  if (notes) booking.internalNotes = notes;
-  await booking.save();
+  const payment = booking.payments.find(p => p.status === 'pending_verification');
+  if (!payment) {
+    return res.status(400).json({ success: false, message: 'No pending payment found.' });
+  }
 
-  res.json({
-    success: true,
-    message: `Payment ${approved ? 'verified and booking confirmed' : 'rejected'}.`,
-    booking
-  });
+  if (approved) {
+    payment.status = 'completed';
+    booking.paymentStatus = payment.amount >= booking.totalAmount ? 'fully_paid' : 'deposit_paid';
+    booking.status = 'confirmed';
+  } else {
+    payment.status = 'failed';
+    booking.paymentStatus = 'unpaid';
+  }
+
+  await booking.save(); // ← always runs first
+
+  try {
+    const emailData = approved
+      ? emails.paymentConfirmed(booking, booking.user, payment.amount)
+      : emails.paymentRejected(booking, booking.user);
+    await sendEmail({ to: booking.user.email, subject: emailData.subject, html: emailData.html });
+  } catch (e) {
+    console.error('Verification email failed:', e.message);
+    // don't return 500 — booking is already saved
+  }
+
+  res.json({ success: true, booking });
 }));
 
 module.exports = router;
