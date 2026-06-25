@@ -84,7 +84,7 @@ router.get('/my', protect, asyncHandler(async (req, res) => {
 // ── GET /api/bookings/:id ─ Single booking ────────────────
 router.get('/:id', protect, asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
-    .populate('tour', 'title destination country duration coverImage included excluded')
+    .populate('tour', 'title destination country duration coverImage included excluded price')
     .populate('user', 'firstName lastName email phone');
 
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
@@ -93,7 +93,22 @@ router.get('/:id', protect, asyncHandler(async (req, res) => {
     return res.status(403).json({ success: false, message: 'Not authorized to view this booking.' });
   }
 
-  res.json({ success: true, booking });
+  // Build paymentSummary so frontend gets receiptUrl directly
+  const paymentSummary = booking.payments.map((p, index) => ({
+    index,
+    method:          p.method,
+    amount:          p.amount,
+    currency:        p.currency,
+    reference:       p.reference,
+    status:          p.status,
+    paidAt:          p.paidAt,
+    bankName:        p.bankName,
+    bankReference:   p.bankReference,
+    receiptUrl:      p.proofOfPayment?.url    || null,
+    receiptPublicId: p.proofOfPayment?.publicId || null,
+  }));
+
+  res.json({ success: true, booking, paymentSummary });
 }));
 
 // ── POST /api/bookings/:id/upload-proof ──────────────────
