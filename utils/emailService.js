@@ -822,6 +822,85 @@ const emails = {
     };
   },
 
+newsletter: (email) => ({
+  subject: '🌿 Welcome to the Osimlai Adventures Newsletter',
+
+  html: shell({
+    preheader: 'Thanks for subscribing to our travel newsletter.',
+
+    body: `
+      <h2 style="
+        margin:0 0 12px;
+        color:${BRAND.colorForest};
+        font-size:26px;
+        font-weight:800;
+      ">
+        Welcome to the Adventure! 🌍
+      </h2>
+
+      <p style="font-size:15px;line-height:1.8;color:#374151;">
+        Thank you for subscribing to the
+        <strong>Osimlai Adventures Newsletter.</strong>
+      </p>
+
+      <p style="font-size:15px;line-height:1.8;color:#374151;">
+        You'll be among the first to receive:
+      </p>
+
+      <ul style="line-height:2;color:#374151;">
+        <li>🦁 New safari packages</li>
+        <li>🌿 Volunteer opportunities</li>
+        <li>✈️ Travel tips</li>
+        <li>🎁 Exclusive discounts</li>
+      </ul>
+
+      ${ctaButton(
+        'Explore Tours',
+        `${BRAND.website}/tours.html`
+      )}
+
+      ${divider()}
+
+      <p style="
+        text-align:center;
+        color:${BRAND.colorMuted};
+        font-size:13px;
+      ">
+        We can't wait to help you discover Africa.
+      </p>
+    `
+  })
+}),
+newsletterAdmin: (email) => ({
+  subject: `📩 New Newsletter Subscriber`,
+
+  html: shell({
+    headerVariant: 'dark',
+
+    body: `
+      ${badge('Newsletter')}
+
+      <h2 style="color:${BRAND.colorForest};">
+        New Subscriber
+      </h2>
+
+      <p>A visitor has subscribed to the newsletter.</p>
+
+      <table width="100%">
+        ${infoRow('Email', email, true)}
+      </table>
+
+      ${ctaButton(
+        'Open Admin Dashboard',
+        BRAND.adminPanel
+      )}
+    `
+  })
+}),
+
+
+
+
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

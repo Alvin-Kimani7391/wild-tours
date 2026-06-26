@@ -78,8 +78,21 @@ router.post('/newsletter', async (req, res) => {
       return res.status(400).json({ message: 'Please provide a valid email address.' });
     }
 
-    const newsletterEmail = emails.contact({ email, firstName: '', message: null });
-    await sendEmail({ to: email, ...newsletterEmail });
+    // Build correct email templates
+    const userEmail = emails.newsletter(email);
+    const adminEmail = emails.newsletterAdmin(email);
+
+    // Send both emails
+    await Promise.all([
+      sendEmail({
+        to: ADMIN_EMAIL,
+        ...adminEmail
+      }),
+      sendEmail({
+        to: email,
+        ...userEmail
+      })
+    ]);
 
     return res.status(200).json({ message: 'Subscribed successfully!' });
 
