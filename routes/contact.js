@@ -90,7 +90,7 @@ router.post('/newsletter', async (req, res) => {
     html: adminEmail.html,
   }),
   sendEmail({
-    to: enquiryData.email,
+    to: email,
     subject: userEmail.subject,
     html: userEmail.html,
   }),
