@@ -111,6 +111,8 @@ router.get('/:id', protect, asyncHandler(async (req, res) => {
   res.json({ success: true, booking, paymentSummary });
 }));
 
+
+
 // ── POST /api/bookings/:id/upload-proof ──────────────────
 router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
