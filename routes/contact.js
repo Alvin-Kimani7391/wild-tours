@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { sendEmail, emails } = require('../utils/emailService');
 
-const TEAM_EMAIL = process.env.TEAM_EMAIL || 'alvinkimani7391@mail.com';
+const TEAM_EMAIL = process.env.ADMIN_EMAIL || 'alvinkimani7391@mail.com';
 
 /* ===== POST /api/contact ===== */
 router.post('/', async (req, res) => {
