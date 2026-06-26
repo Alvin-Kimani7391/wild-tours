@@ -83,16 +83,18 @@ router.post('/newsletter', async (req, res) => {
     const adminEmail = emails.newsletterAdmin(email);
 
     // Send both emails
-    await Promise.all([
-      sendEmail({
-        to: ADMIN_EMAIL,
-        ...adminEmail
-      }),
-      sendEmail({
-        to: email,
-        ...userEmail
-      })
-    ]);
+    await Promise.allSettled([
+  sendEmail({
+    to: ADMIN_EMAIL,
+    subject: adminEmail.subject,
+    html: adminEmail.html,
+  }),
+  sendEmail({
+    to: enquiryData.email,
+    subject: userEmail.subject,
+    html: userEmail.html,
+  }),
+]);
 
     return res.status(200).json({ message: 'Subscribed successfully!' });
 
