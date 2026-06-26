@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { sendEmail, emails } = require('../utils/emailService');
 
-const TEAM_EMAIL = process.env.ADMIN_EMAIL || 'alvinkimani7391@mail.com';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'alvinkimani7391@mail.com';
 
 /* ===== POST /api/contact ===== */
 router.post('/', async (req, res) => {
@@ -52,7 +52,7 @@ router.post('/', async (req, res) => {
 
     // Send team notification + user auto-reply in parallel
     await Promise.all([
-      sendEmail({ to: TEAM_EMAIL, ...adminEmail }),
+      sendEmail({ to: ADMIN_EMAIL, ...adminEmail }),
       sendEmail({ to: enquiryData.email, ...userEmail }),
     ]);
 

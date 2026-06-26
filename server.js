@@ -21,6 +21,7 @@ const reviewRoutes = require('./routes/reviews');
 const blogRoutes = require('./routes/blog');
 const dashboardRoutes = require('./routes/dashboard');
 const uploadRoutes = require('./routes/uploads');
+const contactRoutes = require('./routes/contact');
 
 // Passport config
 require('./config/passport')(passport);
@@ -98,7 +99,7 @@ app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/blog', require('./routes/blog'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/uploads', require('./routes/uploads'));
-
+app.use('/api/contact', require('./routes/contact'));
 // ── HEALTH CHECK ─────────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({ success: true, message: 'WildRoots Africa API is running', timestamp: new Date().toISOString() });
