@@ -207,7 +207,7 @@ router.get('/google/callback',
     const token = req.user.getSignedJwt();
     const redirectUrl = req.user.role === 'admin'
       ? `${process.env.CLIENT_URL}/admin/index.html?token=${token}`
-      : `${process.env.CLIENT_URL}/dashboard.html?token=${token}`;
+      : `${process.env.CLIENT_URL}/index.html?token=${token}`;
     res.redirect(redirectUrl);
   }
 );
