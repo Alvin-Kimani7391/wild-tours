@@ -104,13 +104,10 @@ app.use('/api/uploads', require('./routes/uploads'));
 app.use('/api/contact', require('./routes/contact'));
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/accommodations', require('./routes/accommodation'));
-<<<<<<< HEAD
 
 
 
 
-=======
->>>>>>> 37cfa3730174b559c1ae13a1525e0db766d912c3
 
 
 // ── HEALTH CHECK ─────────────────────────────────────────
