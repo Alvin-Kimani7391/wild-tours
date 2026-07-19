@@ -41,6 +41,36 @@ router.get('/counts', asyncHandler(async (req, res) => {
   res.json({ success: true, counts: map });
 }));
 
+// ── ADMIN: list ALL accommodations (including drafts) ─
+// Must be registered before '/:slug' or Express will try to
+// match the literal path segment "admin" as a slug.
+router.get('/admin', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
+  const { category, country, status, page = 1, limit = 100, search } = req.query;
+  const query = {};
+
+  if (category) query.category = category;
+  if (country) query['location.country'] = new RegExp(country, 'i');
+  if (status === 'active') query.isActive = true;
+  if (status === 'draft') query.isActive = false;
+  if (search) query.$text = { $search: search };
+
+  const items = await Accommodation.find(query)
+    .sort('-createdAt')
+    .skip((page - 1) * limit)
+    .limit(parseInt(limit));
+
+  const total = await Accommodation.countDocuments(query);
+  res.json({ success: true, count: items.length, total, accommodations: items });
+}));
+
+// ── ADMIN: get single by ID (for edit forms) ──────────
+// Also must precede '/:slug'.
+router.get('/id/:id', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
+  const item = await Accommodation.findById(req.params.id).populate('relatedTour', 'title destination');
+  if (!item) return res.status(404).json({ success: false, message: 'Accommodation not found.' });
+  res.json({ success: true, accommodation: item });
+}));
+
 // ── PUBLIC: single by slug ────────────────────────────
 router.get('/:slug', asyncHandler(async (req, res) => {
   const item = await Accommodation.findOne({ slug: req.params.slug, isActive: true })
