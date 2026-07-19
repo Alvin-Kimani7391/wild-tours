@@ -103,7 +103,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/uploads', require('./routes/uploads'));
 app.use('/api/contact', require('./routes/contact'));
 app.use('/api/gallery', require('./routes/gallery'));
-app.use('/api/accommodations', require('./routes/accommodation'));
+app.use('/api/accommodations', require('./routes/accomodation'));
 
 
 // ── HEALTH CHECK ─────────────────────────────────────────
