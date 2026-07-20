@@ -2,12 +2,41 @@ const express = require('express');
 const router = express.Router();
 const Booking = require('../models/Booking');
 const Tour = require('../models/Tour');
+const Accommodation = require('../models/Accommodation');
 const { protect, authorize, asyncHandler } = require('../middleware/auth');
 const { sendEmail, emails } = require('../utils/emailService');
 const { upload, uploadToCloudinary } = require('../config/cloudinary');
 
-// ── POST /api/bookings ─ Create Booking ──────────────────
+const POPULATE_TOUR = 'title destination country duration price coverImage';
+const POPULATE_ACCOMMODATION = 'name slug category location pricePerNight priceType currency media.images';
+
+// ── Helper: check accommodation availability ──────────────
+// Two date ranges overlap when existingStart < newEnd AND existingEnd > newStart.
+async function isAccommodationAvailable(accommodationId, checkInDate, checkOutDate, excludeBookingId = null) {
+  const query = {
+    bookingType: 'accommodation',
+    accommodation: accommodationId,
+    status: { $nin: ['cancelled'] },
+    checkInDate: { $lt: checkOutDate },
+    checkOutDate: { $gt: checkInDate },
+  };
+  if (excludeBookingId) query._id = { $ne: excludeBookingId };
+
+  const clash = await Booking.findOne(query);
+  return !clash;
+}
+
+// ── POST /api/bookings ─ Create Booking (tour or accommodation) ──
 router.post('/', protect, asyncHandler(async (req, res) => {
+  const { bookingType = 'tour' } = req.body;
+
+  if (bookingType === 'accommodation') {
+    return createAccommodationBooking(req, res);
+  }
+  return createTourBooking(req, res);
+}));
+
+async function createTourBooking(req, res) {
   const { tourId, startDate, numberOfTravelers, specialRequests, paymentMethod, travelers } = req.body;
 
   const tour = await Tour.findById(tourId);
@@ -24,6 +53,7 @@ router.post('/', protect, asyncHandler(async (req, res) => {
   const depositAmount   = (totalAmount * depositPercent) / 100;
 
   const booking = await Booking.create({
+    bookingType: 'tour',
     user: req.user._id,
     tour: tourId,
     startDate,
@@ -44,10 +74,9 @@ router.post('/', protect, asyncHandler(async (req, res) => {
   });
 
   const fullBooking = await Booking.findById(booking._id)
-    .populate('tour', 'title destination country duration price coverImage')
+    .populate('tour', POPULATE_TOUR)
     .populate('user', 'firstName lastName email phone');
 
-  // ── Emails ───────────────────────────────────────────────
   try {
     const userEmail  = emails.bookingUser(fullBooking, req.user);
     await sendEmail({ to: req.user.email, subject: userEmail.subject, html: userEmail.html });
@@ -63,16 +92,118 @@ router.post('/', protect, asyncHandler(async (req, res) => {
     message: 'Booking created successfully. Check your email for confirmation.',
     booking: fullBooking,
   });
-}));
+}
+
+async function createAccommodationBooking(req, res) {
+  const {
+    accommodationId, checkInDate, checkOutDate, numberOfGuests,
+    specialRequests, paymentMethod, travelers
+  } = req.body;
+
+  const accommodation = await Accommodation.findById(accommodationId);
+  if (!accommodation || !accommodation.isActive) {
+    return res.status(404).json({ success: false, message: 'Accommodation not found or unavailable.' });
+  }
+
+  const checkIn  = new Date(checkInDate);
+  const checkOut = new Date(checkOutDate);
+  if (isNaN(checkIn) || isNaN(checkOut) || checkOut <= checkIn) {
+    return res.status(400).json({ success: false, message: 'Please provide a valid checkInDate and checkOutDate.' });
+  }
+  if (numberOfGuests > accommodation.capacity.maxGuests) {
+    return res.status(400).json({ success: false, message: `This accommodation sleeps a maximum of ${accommodation.capacity.maxGuests} guests.` });
+  }
+
+  const available = await isAccommodationAvailable(accommodationId, checkIn, checkOut);
+  if (!available) {
+    return res.status(409).json({ success: false, message: 'This accommodation is already booked for part or all of the selected dates.' });
+  }
+
+  const msPerNight     = 1000 * 60 * 60 * 24;
+  const numberOfNights = Math.ceil((checkOut - checkIn) / msPerNight);
+
+  // per_person pricing multiplies by guests as well as nights; per_night/per_tent just by nights.
+  const totalAmount = accommodation.priceType === 'per_person'
+    ? accommodation.pricePerNight * numberOfGuests * numberOfNights
+    : accommodation.pricePerNight * numberOfNights;
+
+  const depositPercent = 20; // accommodations don't carry their own depositPercent field yet
+  const depositAmount  = (totalAmount * depositPercent) / 100;
+
+  const booking = await Booking.create({
+    bookingType: 'accommodation',
+    user: req.user._id,
+    accommodation: accommodationId,
+    checkInDate: checkIn,
+    checkOutDate: checkOut,
+    numberOfNights,
+    numberOfGuests,
+    travelers: travelers || [],
+    pricePerNight: accommodation.pricePerNight,
+    totalAmount,
+    depositAmount,
+    currency: accommodation.currency,
+    specialRequests,
+    paymentMethod,
+    status: 'pending',
+    bankTransferDetails: paymentMethod === 'bank_transfer' ? {
+      bankName:    'Equity Bank Kenya',
+      accountName: 'WildRoots Africa Ltd',
+      accountNo:   '0150263XXXX',
+      swiftCode:   'EQBLKENA',
+    } : undefined,
+  });
+
+  const fullBooking = await Booking.findById(booking._id)
+    .populate('accommodation', POPULATE_ACCOMMODATION)
+    .populate('user', 'firstName lastName email phone');
+
+  // emailService doesn't have accommodation-specific templates yet, so we send
+  // a minimal branded email directly until dedicated ones are added.
+  try {
+    await sendEmail({
+      to: req.user.email,
+      subject: `Booking Received — ${fullBooking.bookingRef}`,
+      html: `
+        <p>Hi ${req.user.firstName},</p>
+        <p>We've received your booking request <strong>${fullBooking.bookingRef}</strong>
+        for <strong>${accommodation.name}</strong>.</p>
+        <p>Check-in: ${checkIn.toDateString()}<br/>
+        Check-out: ${checkOut.toDateString()} (${numberOfNights} night${numberOfNights > 1 ? 's' : ''})</p>
+        <p>Total: ${accommodation.currency} ${totalAmount.toFixed(2)} — deposit due: ${accommodation.currency} ${depositAmount.toFixed(2)}</p>
+        <p>We'll confirm availability and payment instructions shortly.</p>
+      `
+    });
+    await sendEmail({
+      to: process.env.ADMIN_EMAIL,
+      subject: `New Accommodation Booking — ${fullBooking.bookingRef}`,
+      html: `
+        <p>${req.user.firstName} ${req.user.lastName} (${req.user.email}) booked
+        <strong>${accommodation.name}</strong>.</p>
+        <p>${checkIn.toDateString()} → ${checkOut.toDateString()} · ${numberOfGuests} guest(s)</p>
+      `
+    });
+  } catch (err) {
+    console.error('Accommodation booking email failed:', err.message);
+  }
+
+  res.status(201).json({
+    success: true,
+    message: 'Booking created successfully. Check your email for confirmation.',
+    booking: fullBooking,
+  });
+}
 
 // ── GET /api/bookings/my ─ User's bookings ────────────────
 router.get('/my', protect, asyncHandler(async (req, res) => {
-  const { status, page = 1, limit = 10 } = req.query;
+  const { status, bookingType, page = 1, limit = 10 } = req.query;
   const query = { user: req.user._id };
   if (status) query.status = status;
+  if (bookingType) query.bookingType = bookingType;
 
   const bookings = await Booking.find(query)
     .populate('tour', 'title destination country duration coverImage')
+    .populate('accommodation', 'name slug category location pricePerNight currency media.images')
     .sort('-createdAt')
     .skip((page - 1) * limit)
     .limit(parseInt(limit));
@@ -85,6 +216,7 @@ router.get('/my', protect, asyncHandler(async (req, res) => {
 router.get('/:id', protect, asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate('tour', 'title destination country duration coverImage included excluded price')
+    .populate('accommodation', 'name slug category location pricePerNight priceType currency media.images policies')
     .populate('user', 'firstName lastName email phone');
 
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
@@ -111,13 +243,12 @@ router.get('/:id', protect, asyncHandler(async (req, res) => {
   res.json({ success: true, booking, paymentSummary });
 }));
 
-
-
 // ── POST /api/bookings/:id/upload-proof ──────────────────
 router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate('user', 'firstName lastName email')
-    .populate('tour', 'title');
+    .populate('tour', 'title')
+    .populate('accommodation', 'name');
 
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
   if (booking.user._id.toString() !== req.user._id.toString()) {
@@ -141,7 +272,6 @@ router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(a
   booking.paymentMethod = 'bank_transfer';
   await booking.save();
 
-  // ── Emails ───────────────────────────────────────────────
   try {
     const adminEmail = emails.bankReceiptAdminAlert(booking, booking.user, amount, result.secure_url);
     await sendEmail({ to: process.env.ADMIN_EMAIL, subject: adminEmail.subject, html: adminEmail.html });
@@ -159,6 +289,7 @@ router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(a
 router.put('/:id/cancel', protect, asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate('tour', 'title')
+    .populate('accommodation', 'name')
     .populate('user', 'firstName lastName email');
 
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
@@ -175,9 +306,8 @@ router.put('/:id/cancel', protect, asyncHandler(async (req, res) => {
   booking.cancelledBy        = req.user._id;
   await booking.save();
 
-  // ── Email ─────────────────────────────────────────────────
-  // emailService doesn't have a dedicated cancellation template yet,
-  // so we send a minimal branded email directly until one is added.
+  const itemName = booking.bookingType === 'accommodation' ? booking.accommodation.name : booking.tour.title;
+
   try {
     await sendEmail({
       to: booking.user.email,
@@ -185,7 +315,7 @@ router.put('/:id/cancel', protect, asyncHandler(async (req, res) => {
       html: `
         <p>Hi ${booking.user.firstName},</p>
         <p>Your booking <strong>${booking.bookingRef}</strong> for
-        <strong>${booking.tour.title}</strong> has been cancelled.</p>
+        <strong>${itemName}</strong> has been cancelled.</p>
         <p>Reason: ${booking.cancellationReason}</p>
         <p>If this was a mistake, please contact us.</p>
       `
@@ -197,16 +327,19 @@ router.put('/:id/cancel', protect, asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Booking cancelled successfully.', booking });
 }));
 
-// ── ADMIN: GET all bookings ───────────────────────────────
+// ── ADMIN: GET all bookings (tours + accommodations) ──────
 router.get('/', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
-  const { status, paymentStatus, page = 1, limit = 20, tourId } = req.query;
+  const { status, paymentStatus, page = 1, limit = 20, tourId, accommodationId, bookingType } = req.query;
   const query = {};
-  if (status)        query.status        = status;
-  if (paymentStatus) query.paymentStatus = paymentStatus;
-  if (tourId)        query.tour          = tourId;
+  if (status)          query.status        = status;
+  if (paymentStatus)   query.paymentStatus = paymentStatus;
+  if (tourId)          query.tour          = tourId;
+  if (accommodationId) query.accommodation = accommodationId;
+  if (bookingType)      query.bookingType  = bookingType; // 'tour' | 'accommodation'
 
   const bookings = await Booking.find(query)
     .populate('tour', 'title destination country')
+    .populate('accommodation', 'name slug category location pricePerNight currency')
     .populate('user', 'firstName lastName email phone')
     .sort('-createdAt')
     .skip((page - 1) * limit)
@@ -215,7 +348,7 @@ router.get('/', protect, authorize('admin', 'staff'), asyncHandler(async (req, r
   const total = await Booking.countDocuments(query);
 
   const stats = await Booking.aggregate([
-    { $group: { _id: '$status', count: { $sum: 1 }, revenue: { $sum: '$totalAmount' } } }
+    { $group: { _id: { status: '$status', bookingType: '$bookingType' }, count: { $sum: 1 }, revenue: { $sum: '$totalAmount' } } }
   ]);
 
   res.json({ success: true, count: bookings.length, total, pages: Math.ceil(total / limit), bookings, stats });
@@ -227,6 +360,7 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
 
   const booking = await Booking.findById(req.params.id)
     .populate('tour', 'title')
+    .populate('accommodation', 'name')
     .populate('user', 'firstName lastName email');
 
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
@@ -237,10 +371,10 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
   if (internalNotes)  booking.internalNotes = internalNotes;
   await booking.save();
 
-  // ── Email on status change ────────────────────────────────
+  const itemName = booking.bookingType === 'accommodation' ? booking.accommodation.name : booking.tour.title;
+
   if (status && status !== prevStatus) {
     try {
-      // Use paymentConfirmed template when admin marks as confirmed + paid
       if (status === 'confirmed' && paymentStatus === 'deposit_paid' || paymentStatus === 'fully_paid') {
         const lastPayment = booking.payments[booking.payments.length - 1];
         const emailData = emails.paymentConfirmed(booking, booking.user, lastPayment?.amount || booking.depositAmount);
@@ -254,7 +388,7 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
             <p>Hi ${booking.user.firstName},</p>
             <p>Your booking <strong>${booking.bookingRef}</strong> status is now:
             <strong>${status}</strong>.</p>
-            <p>Tour: ${booking.tour.title}</p>
+            <p>${booking.bookingType === 'accommodation' ? 'Accommodation' : 'Tour'}: ${itemName}</p>
             ${internalNotes ? `<p>Note from us: ${internalNotes}</p>` : ''}
           `
         });
@@ -268,14 +402,13 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
 }));
 
 // ── ADMIN: Verify bank transfer payment ───────────────────
-// ── PATCH /api/admin/bookings/:id/verify-payment ──────────
-// ── ADMIN: Verify bank transfer payment ───────────────────
 router.patch('/:id/verify-payment', protect, authorize('admin'), asyncHandler(async (req, res) => {
   const { approved } = req.body;
 
   const booking = await Booking.findById(req.params.id)
     .populate('user', 'firstName email')
-    .populate('tour', 'title');
+    .populate('tour', 'title')
+    .populate('accommodation', 'name');
 
   if (!booking) {
     return res.status(404).json({ success: false, message: 'Booking not found.' });
