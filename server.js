@@ -105,6 +105,7 @@ app.use('/api/contact', require('./routes/contact'));
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/accommodations', require('./routes/accommodation'));
 
+
 // ── HEALTH CHECK ─────────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({ success: true, message: 'WildRoots Africa API is running', timestamp: new Date().toISOString() });

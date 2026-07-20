@@ -470,6 +470,44 @@ const emails = {
     }),
   }),
 
+
+
+
+// In emails object
+bookingAccommodationUser: (booking, user) => ({
+  subject: `Booking Confirmation — ${booking.bookingRef}`,
+  html: `
+    <h2>Accommodation Booked!</h2>
+    <p>Hi ${user.firstName},</p>
+    <p>Your booking <strong>${booking.bookingRef}</strong> for 
+    <strong>${booking.accommodation.name}</strong> has been confirmed.</p>
+    <p><strong>Dates:</strong> ${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}</p>
+    <p><strong>Guests:</strong> ${booking.numberOfGuests}</p>
+    <p><strong>Total:</strong> ${booking.currency} ${booking.totalAmount}</p>
+    <p><strong>Deposit Required:</strong> ${booking.currency} ${booking.depositAmount}</p>
+    <!-- Include banking details if bank transfer -->
+  `
+}),
+
+bookingAccommodationAdmin: (booking, user) => ({
+  subject: `New Accommodation Booking — ${booking.bookingRef}`,
+  html: `
+    <h2>New Booking Received</h2>
+    <p><strong>Booking Ref:</strong> ${booking.bookingRef}</p>
+    <p><strong>Accommodation:</strong> ${booking.accommodation.name}</p>
+    <p><strong>Guest:</strong> ${user.firstName} ${user.lastName}</p>
+    <p><strong>Email:</strong> ${user.email}</p>
+    <p><strong>Dates:</strong> ${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}</p>
+    <p><strong>Guests:</strong> ${booking.numberOfGuests}</p>
+    <p><strong>Total:</strong> ${booking.currency} ${booking.totalAmount}</p>
+    <p><strong>Deposit:</strong> ${booking.currency} ${booking.depositAmount}</p>
+    <p><strong>Payment Method:</strong> ${booking.paymentMethod}</p>
+    <!-- View in admin dashboard -->
+  `
+}),
+
+
+
   // ── 6. PAYMENT REJECTED ────────────────────────────────────────────────────
   paymentRejected: (booking, user, reason = '') => ({
     subject: `Action Required — Payment Not Verified &middot; ${esc(booking.bookingRef)}`,
