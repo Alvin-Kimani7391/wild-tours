@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Accommodation = require('../models/Accommodation');
+const Booking = require('../models/Booking');
 const { protect, authorize, asyncHandler } = require('../middleware/auth');
 const { cloudinary, accommodationUpload, deleteFromCloudinary } = require('../config/cloudinary');
 
@@ -69,6 +70,37 @@ router.get('/id/:id', protect, authorize('admin', 'staff'), asyncHandler(async (
   const item = await Accommodation.findById(req.params.id).populate('relatedTour', 'title destination');
   if (!item) return res.status(404).json({ success: false, message: 'Accommodation not found.' });
   res.json({ success: true, accommodation: item });
+}));
+
+// ── PUBLIC: check availability for a date range ────────
+// Must also precede '/:slug'.
+router.get('/:id/availability', asyncHandler(async (req, res) => {
+  const { checkIn, checkOut } = req.query;
+  if (!checkIn || !checkOut) {
+    return res.status(400).json({ success: false, message: 'checkIn and checkOut query params are required.' });
+  }
+
+  const checkInDate  = new Date(checkIn);
+  const checkOutDate = new Date(checkOut);
+  if (isNaN(checkInDate) || isNaN(checkOutDate) || checkOutDate <= checkInDate) {
+    return res.status(400).json({ success: false, message: 'Invalid date range.' });
+  }
+
+  const item = await Accommodation.findById(req.params.id);
+  if (!item || !item.isActive) {
+    return res.status(404).json({ success: false, message: 'Accommodation not found.' });
+  }
+
+  // Overlap rule: existingStart < newEnd AND existingEnd > newStart
+  const clash = await Booking.findOne({
+    bookingType: 'accommodation',
+    accommodation: req.params.id,
+    status: { $nin: ['cancelled'] },
+    checkInDate: { $lt: checkOutDate },
+    checkOutDate: { $gt: checkInDate },
+  });
+
+  res.json({ success: true, available: !clash });
 }));
 
 // ── PUBLIC: single by slug ────────────────────────────
