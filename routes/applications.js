@@ -21,12 +21,10 @@ router.post(
       medicalConditions, dietaryRequirements, hasPassport,
     } = req.body;
 
-    // Verify program exists and is active
     const program = await VolunteerProgram.findById(programId);
     if (!program || !program.isActive)
       return res.status(404).json({ success: false, message: 'Program not found.' });
 
-    // No duplicate active applications
     const existing = await Application.findOne({
       user: req.user._id,
       program: programId,
@@ -38,7 +36,6 @@ router.post(
         message: 'You already have an active application for this program.',
       });
 
-    // Upload documents to Cloudinary
     const documents = [];
     if (req.files) {
       for (const [fieldName, files] of Object.entries(req.files)) {
@@ -54,7 +51,6 @@ router.post(
       }
     }
 
-    // Parse JSON fields sent as strings from multipart forms
     const parse = v => (typeof v === 'string' ? JSON.parse(v) : v);
     const parsedPersonal   = parse(personalInfo);
     const parsedEmergency  = parse(emergencyContact);
@@ -81,33 +77,15 @@ router.post(
 
     await application.populate('program', 'title country location duration programFee');
 
-    // Confirmation emails (non-blocking)
-    // 🌿 USER CONFIRMATION EMAIL
-try {
-  const userEmail = emails.volunteerReceived(req.user, program.title);
+    try {
+      const userEmail = emails.volunteerReceived(req.user, program.title);
+      await sendEmail({ to: req.user.email, subject: userEmail.subject, html: userEmail.html });
 
-  await sendEmail({
-    to: req.user.email,
-    subject: userEmail.subject,
-    html: userEmail.html,
-  });
-
-  // 🔔 ADMIN ALERT EMAIL
-  const adminEmail = emails.volunteerAdminAlert(
-    req.user,
-    program,
-    application.applicationRef
-  );
-
-  await sendEmail({
-    to: process.env.ADMIN_EMAIL,
-    subject: adminEmail.subject,
-    html: adminEmail.html,
-  });
-
-} catch (e) {
-  console.error('Application email error:', e.message);
-}
+      const adminEmail = emails.volunteerAdminAlert(req.user, program, application.applicationRef);
+      await sendEmail({ to: process.env.ADMIN_EMAIL, subject: adminEmail.subject, html: adminEmail.html });
+    } catch (e) {
+      console.error('Application email error:', e.message);
+    }
 
     res.status(201).json({
       success: true,
@@ -117,7 +95,7 @@ try {
   })
 );
 
-// GET /api/applications/my — current user's own applications
+// GET /api/applications/my
 router.get('/my', protect, asyncHandler(async (req, res) => {
   const applications = await Application.find({ user: req.user._id })
     .populate('program', 'title country location duration coverImage')
@@ -135,7 +113,7 @@ router.get('/:id', protect, asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Application not found.' });
 
   const isOwner = app.user._id.toString() === req.user._id.toString();
-  const isAdmin = req.user.role === 'admin';
+  const isAdmin = ['admin', 'staff'].includes(req.user.role);
   if (!isOwner && !isAdmin)
     return res.status(403).json({ success: false, message: 'Not authorized.' });
 
@@ -174,7 +152,7 @@ router.put(
     const { status, reviewNotes, rejectionReason } = req.body;
 
     const app = await Application.findById(req.params.id)
-      .populate('user', 'firstName email')
+      .populate('user', 'firstName lastName email')
       .populate('program', 'title country');
 
     if (!app)
@@ -187,28 +165,46 @@ router.put(
     if (rejectionReason)  app.rejectionReason  = rejectionReason;
     await app.save();
 
-    // Status notification email (non-blocking)
     try {
-  const statusEmail = emails.volunteerStatusUpdate(
-    app.user,
-    app.program.title,
-    status,
-    app.applicationRef,
-    reviewNotes,
-    rejectionReason
-  );
-
-  await sendEmail({
-    to: app.user.email,
-    subject: statusEmail.subject,
-    html: statusEmail.html,
-  });
-
-} catch (e) {
-  console.error('Status email failed:', e.message);
-}
+      const statusEmail = emails.volunteerStatusUpdate(
+        app.user,
+        app.program.title,
+        status,
+        app.applicationRef,
+        reviewNotes,
+        rejectionReason
+      );
+      await sendEmail({ to: app.user.email, subject: statusEmail.subject, html: statusEmail.html });
+    } catch (e) {
+      console.error('Status email failed:', e.message);
+    }
 
     res.json({ success: true, message: `Application ${status}.`, application: app });
+  })
+);
+
+// ── ADMIN: Email Applicant (free-text message button) ─────
+router.post(
+  '/:id/email-applicant',
+  protect,
+  authorize('admin', 'staff'),
+  asyncHandler(async (req, res) => {
+    const app = await Application.findById(req.params.id)
+      .populate('user', 'firstName lastName email')
+      .populate('program', 'title');
+
+    if (!app) return res.status(404).json({ success: false, message: 'Application not found.' });
+
+    const message = (req.body?.message || '').trim();
+    if (!message) return res.status(400).json({ success: false, message: 'Message text is required.' });
+
+    const tpl = emails.emailApplicantCustom(app, app.user, message, req.body?.subject);
+    const result = await sendEmail({ to: app.user.email, subject: tpl.subject, html: tpl.html });
+
+    if (result?.error) {
+      return res.status(502).json({ success: false, message: 'Could not send email right now.' });
+    }
+    res.json({ success: true, message: `Email sent to ${app.user.email}.` });
   })
 );
 

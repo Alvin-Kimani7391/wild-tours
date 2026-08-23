@@ -11,7 +11,6 @@ const POPULATE_TOUR = 'title destination country duration price coverImage';
 const POPULATE_ACCOMMODATION = 'name slug category location pricePerNight priceType currency media.images';
 
 // ── Helper: check accommodation availability ──────────────
-// Two date ranges overlap when existingStart < newEnd AND existingEnd > newStart.
 async function isAccommodationAvailable(accommodationId, checkInDate, checkOutDate, excludeBookingId = null) {
   const query = {
     bookingType: 'accommodation',
@@ -21,14 +20,11 @@ async function isAccommodationAvailable(accommodationId, checkInDate, checkOutDa
     checkOutDate: { $gt: checkInDate },
   };
   if (excludeBookingId) query._id = { $ne: excludeBookingId };
-
   const clash = await Booking.findOne(query);
   return !clash;
 }
 
-// ── Helper: wrap a multer middleware so its errors (bad file type,
-// file too large, etc.) come back as clean JSON instead of crashing
-// through Express's default HTML error handler. ───────────────────
+// ── Helper: wrap multer middleware errors as clean JSON ────
 function handleUpload(multerMiddleware) {
   return (req, res, next) => {
     multerMiddleware(req, res, (err) => {
@@ -43,13 +39,23 @@ function handleUpload(multerMiddleware) {
   };
 }
 
+// ── Helper: load a booking fully populated + confirm ownership ─────
+async function loadOwnedBooking(bookingId, reqUser) {
+  const booking = await Booking.findById(bookingId)
+    .populate('tour', POPULATE_TOUR)
+    .populate('accommodation', POPULATE_ACCOMMODATION)
+    .populate('user', 'firstName lastName email phone');
+  if (!booking) return { error: 404, message: 'Booking not found.' };
+  const isOwner = booking.user._id.toString() === reqUser._id.toString();
+  const isAdmin = ['admin', 'staff'].includes(reqUser.role);
+  if (!isOwner && !isAdmin) return { error: 403, message: 'Not authorized.' };
+  return { booking };
+}
+
 // ── POST /api/bookings ─ Create Booking (tour or accommodation) ──
 router.post('/', protect, asyncHandler(async (req, res) => {
   const { bookingType = 'tour' } = req.body;
-
-  if (bookingType === 'accommodation') {
-    return createAccommodationBooking(req, res);
-  }
+  if (bookingType === 'accommodation') return createAccommodationBooking(req, res);
   return createTourBooking(req, res);
 }));
 
@@ -139,12 +145,11 @@ async function createAccommodationBooking(req, res) {
   const msPerNight     = 1000 * 60 * 60 * 24;
   const numberOfNights = Math.ceil((checkOut - checkIn) / msPerNight);
 
-  // per_person pricing multiplies by guests as well as nights; per_night/per_tent just by nights.
   const totalAmount = accommodation.priceType === 'per_person'
     ? accommodation.pricePerNight * numberOfGuests * numberOfNights
     : accommodation.pricePerNight * numberOfNights;
 
-  const depositPercent = 20; // accommodations don't carry their own depositPercent field yet
+  const depositPercent = 20;
   const depositAmount  = (totalAmount * depositPercent) / 100;
 
   const booking = await Booking.create({
@@ -175,31 +180,12 @@ async function createAccommodationBooking(req, res) {
     .populate('accommodation', POPULATE_ACCOMMODATION)
     .populate('user', 'firstName lastName email phone');
 
-  // emailService doesn't have accommodation-specific templates yet, so we send
-  // a minimal branded email directly until dedicated ones are added.
   try {
-    await sendEmail({
-      to: req.user.email,
-      subject: `Booking Received — ${fullBooking.bookingRef}`,
-      html: `
-        <p>Hi ${req.user.firstName},</p>
-        <p>We've received your booking request <strong>${fullBooking.bookingRef}</strong>
-        for <strong>${accommodation.name}</strong>.</p>
-        <p>Check-in: ${checkIn.toDateString()}<br/>
-        Check-out: ${checkOut.toDateString()} (${numberOfNights} night${numberOfNights > 1 ? 's' : ''})</p>
-        <p>Total: ${accommodation.currency} ${totalAmount.toFixed(2)} — deposit due: ${accommodation.currency} ${depositAmount.toFixed(2)}</p>
-        <p>We'll confirm availability and payment instructions shortly.</p>
-      `
-    });
-    await sendEmail({
-      to: process.env.ADMIN_EMAIL,
-      subject: `New Accommodation Booking — ${fullBooking.bookingRef}`,
-      html: `
-        <p>${req.user.firstName} ${req.user.lastName} (${req.user.email}) booked
-        <strong>${accommodation.name}</strong>.</p>
-        <p>${checkIn.toDateString()} → ${checkOut.toDateString()} · ${numberOfGuests} guest(s)</p>
-      `
-    });
+    const userEmail = emails.bookingAccommodationUser(fullBooking, req.user);
+    await sendEmail({ to: req.user.email, subject: userEmail.subject, html: userEmail.html });
+
+    const adminEmail = emails.bookingAccommodationAdmin(fullBooking, req.user);
+    await sendEmail({ to: process.env.ADMIN_EMAIL, subject: adminEmail.subject, html: adminEmail.html });
   } catch (err) {
     console.error('Accommodation booking email failed:', err.message);
   }
@@ -238,11 +224,10 @@ router.get('/:id', protect, asyncHandler(async (req, res) => {
 
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
 
-  if (booking.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+  if (booking.user._id.toString() !== req.user._id.toString() && !['admin', 'staff'].includes(req.user.role)) {
     return res.status(403).json({ success: false, message: 'Not authorized to view this booking.' });
   }
 
-  // Build paymentSummary so frontend gets receiptUrl directly
   const paymentSummary = booking.payments.map((p, index) => ({
     index,
     method:          p.method,
@@ -260,12 +245,79 @@ router.get('/:id', protect, asyncHandler(async (req, res) => {
   res.json({ success: true, booking, paymentSummary });
 }));
 
+// ── POST /api/bookings/:id/email-details ──────────────────
+// Replaces the old fake "Download PDF" button — sends a fully
+// detailed booking summary straight to the guest's inbox.
+router.post('/:id/email-details', protect, asyncHandler(async (req, res) => {
+  const result = await loadOwnedBooking(req.params.id, req.user);
+  if (result.error) return res.status(result.error).json({ success: false, message: result.message });
+
+  const { booking } = result;
+  const tpl = emails.bookingDetails(booking, booking.user);
+  const sendResult = await sendEmail({ to: booking.user.email, subject: tpl.subject, html: tpl.html });
+
+  if (sendResult?.error) {
+    return res.status(502).json({ success: false, message: 'Could not send email right now. Please try again shortly.' });
+  }
+  res.json({ success: true, message: `Booking details emailed to ${booking.user.email}.` });
+}));
+
+// ── POST /api/bookings/:id/contact-guide ──────────────────
+// Tour bookings — message goes to the guide/coordinator inbox,
+// guest gets an acknowledgement.
+router.post('/:id/contact-guide', protect, asyncHandler(async (req, res) => {
+  const result = await loadOwnedBooking(req.params.id, req.user);
+  if (result.error) return res.status(result.error).json({ success: false, message: result.message });
+  const { booking } = result;
+
+  const message = (req.body?.message || '').trim() ||
+    `Hi, I have a question about my upcoming safari (${booking.bookingRef}). Could someone get in touch with me?`;
+
+  const { emails: mails } = require('../utils/emailService');
+  const guideEmail = process.env.GUIDE_EMAIL || process.env.ADMIN_EMAIL;
+
+  try {
+    const toGuide = emails.contactGuideAdmin(booking, booking.user, message);
+    await sendEmail({ to: guideEmail, subject: toGuide.subject, html: toGuide.html });
+
+    const toGuest = emails.contactGuideUser(booking, booking.user);
+    await sendEmail({ to: booking.user.email, subject: toGuest.subject, html: toGuest.html });
+  } catch (e) {
+    console.error('contact-guide email error:', e.message);
+    return res.status(502).json({ success: false, message: 'Could not send your message right now.' });
+  }
+
+  res.json({ success: true, message: 'Message sent to your guide. Our team will contact you within 24 hours.' });
+}));
+
+// ── POST /api/bookings/:id/contact-host ───────────────────
+// Accommodation bookings — message goes to the host/admin inbox,
+// guest gets an acknowledgement.
+router.post('/:id/contact-host', protect, asyncHandler(async (req, res) => {
+  const result = await loadOwnedBooking(req.params.id, req.user);
+  if (result.error) return res.status(result.error).json({ success: false, message: result.message });
+  const { booking } = result;
+
+  const message = (req.body?.message || '').trim() ||
+    `Hi, I have a question about my stay booking (${booking.bookingRef}). Could someone get in touch with me?`;
+
+  const hostEmail = process.env.HOST_EMAIL || process.env.ADMIN_EMAIL;
+
+  try {
+    const toHost = emails.contactHostAdmin(booking, booking.user, message);
+    await sendEmail({ to: hostEmail, subject: toHost.subject, html: toHost.html });
+
+    const toGuest = emails.contactHostUser(booking, booking.user);
+    await sendEmail({ to: booking.user.email, subject: toGuest.subject, html: toGuest.html });
+  } catch (e) {
+    console.error('contact-host email error:', e.message);
+    return res.status(502).json({ success: false, message: 'Could not send your message right now.' });
+  }
+
+  res.json({ success: true, message: 'Message sent to the host/our team. Expect a reply within 24 hours.' });
+}));
+
 // ── POST /api/bookings/:id/upload-proof ──────────────────
-// Accepts JPG/PNG/WEBP images or PDF receipts via the dedicated
-// receiptUpload config (see config/cloudinary.js), which streams the
-// file straight to Cloudinary — so by the time this handler runs,
-// req.file.path is already the secure_url and req.file.filename is
-// already the public_id. No second upload call is needed.
 router.post('/:id/upload-proof', protect, handleUpload(receiptUpload.single('proof')), asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate('user', 'firstName lastName email')
@@ -327,20 +379,12 @@ router.put('/:id/cancel', protect, asyncHandler(async (req, res) => {
   booking.cancelledBy        = req.user._id;
   await booking.save();
 
-  const itemName = booking.bookingType === 'accommodation' ? booking.accommodation.name : booking.tour.title;
-
   try {
-    await sendEmail({
-      to: booking.user.email,
-      subject: `Booking Cancelled — ${booking.bookingRef}`,
-      html: `
-        <p>Hi ${booking.user.firstName},</p>
-        <p>Your booking <strong>${booking.bookingRef}</strong> for
-        <strong>${itemName}</strong> has been cancelled.</p>
-        <p>Reason: ${booking.cancellationReason}</p>
-        <p>If this was a mistake, please contact us.</p>
-      `
-    });
+    const toGuest = emails.bookingCancelled(booking, booking.user, booking.cancellationReason);
+    await sendEmail({ to: booking.user.email, subject: toGuest.subject, html: toGuest.html });
+
+    const toAdmin = emails.bookingCancelledAdmin(booking, booking.user, booking.cancellationReason);
+    await sendEmail({ to: process.env.ADMIN_EMAIL, subject: toAdmin.subject, html: toAdmin.html });
   } catch (e) {
     console.error('Cancel email error:', e.message);
   }
@@ -356,7 +400,7 @@ router.get('/', protect, authorize('admin', 'staff'), asyncHandler(async (req, r
   if (paymentStatus)   query.paymentStatus = paymentStatus;
   if (tourId)          query.tour          = tourId;
   if (accommodationId) query.accommodation = accommodationId;
-  if (bookingType)      query.bookingType  = bookingType; // 'tour' | 'accommodation'
+  if (bookingType)      query.bookingType  = bookingType;
 
   const bookings = await Booking.find(query)
     .populate('tour', 'title destination country')
@@ -386,33 +430,37 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
 
   if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
 
-  const prevStatus  = booking.status;
-  booking.status    = status || booking.status;
+  const prevStatus = booking.status;
+  booking.status   = status || booking.status;
   if (paymentStatus)  booking.paymentStatus = paymentStatus;
   if (internalNotes)  booking.internalNotes = internalNotes;
+  if (status === 'cancelled') {
+    booking.cancellationReason = internalNotes || 'Cancelled by admin';
+    booking.cancelledAt = Date.now();
+    booking.cancelledBy = req.user._id;
+  }
   await booking.save();
-
-  const itemName = booking.bookingType === 'accommodation' ? booking.accommodation.name : booking.tour.title;
 
   if (status && status !== prevStatus) {
     try {
-      if (status === 'confirmed' && paymentStatus === 'deposit_paid' || paymentStatus === 'fully_paid') {
+      if (status === 'cancelled') {
+        const toGuest = emails.bookingCancelled(booking, booking.user, booking.cancellationReason);
+        await sendEmail({ to: booking.user.email, subject: toGuest.subject, html: toGuest.html });
+      } else if (status === 'confirmed') {
+        const toGuest = emails.bookingConfirmed(booking, booking.user);
+        await sendEmail({ to: booking.user.email, subject: toGuest.subject, html: toGuest.html });
+      } else if (paymentStatus === 'deposit_paid' || paymentStatus === 'fully_paid') {
         const lastPayment = booking.payments[booking.payments.length - 1];
         const emailData = emails.paymentConfirmed(booking, booking.user, lastPayment?.amount || booking.depositAmount);
         await sendEmail({ to: booking.user.email, subject: emailData.subject, html: emailData.html });
       } else {
-        // Generic status update — send plain email until a dedicated template is added
-        await sendEmail({
-          to: booking.user.email,
-          subject: `Booking Update — ${booking.bookingRef}`,
-          html: `
-            <p>Hi ${booking.user.firstName},</p>
-            <p>Your booking <strong>${booking.bookingRef}</strong> status is now:
-            <strong>${status}</strong>.</p>
-            <p>${booking.bookingType === 'accommodation' ? 'Accommodation' : 'Tour'}: ${itemName}</p>
-            ${internalNotes ? `<p>Note from us: ${internalNotes}</p>` : ''}
-          `
-        });
+        const tpl = emails.emailGuestCustom(
+          booking,
+          booking.user,
+          `Your booking status has been updated to: ${status}.${internalNotes ? ` Note: ${internalNotes}` : ''}`,
+          `Booking Update — ${booking.bookingRef}`
+        );
+        await sendEmail({ to: booking.user.email, subject: tpl.subject, html: tpl.html });
       }
     } catch (e) {
       console.error('Status update email error:', e.message);
@@ -420,6 +468,27 @@ router.put('/:id/status', protect, authorize('admin', 'staff'), asyncHandler(asy
   }
 
   res.json({ success: true, message: `Booking updated successfully.`, booking });
+}));
+
+// ── ADMIN: Email Guest (free-text message button) ─────────
+router.post('/:id/email-guest', protect, authorize('admin', 'staff'), asyncHandler(async (req, res) => {
+  const booking = await Booking.findById(req.params.id)
+    .populate('tour', 'title')
+    .populate('accommodation', 'name')
+    .populate('user', 'firstName lastName email');
+
+  if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
+
+  const message = (req.body?.message || '').trim();
+  if (!message) return res.status(400).json({ success: false, message: 'Message text is required.' });
+
+  const tpl = emails.emailGuestCustom(booking, booking.user, message, req.body?.subject);
+  const result = await sendEmail({ to: booking.user.email, subject: tpl.subject, html: tpl.html });
+
+  if (result?.error) {
+    return res.status(502).json({ success: false, message: 'Could not send email right now.' });
+  }
+  res.json({ success: true, message: `Email sent to ${booking.user.email}.` });
 }));
 
 // ── ADMIN: Verify bank transfer payment ───────────────────
@@ -449,7 +518,7 @@ router.patch('/:id/verify-payment', protect, authorize('admin'), asyncHandler(as
     booking.paymentStatus = 'unpaid';
   }
 
-  await booking.save(); // ← always runs first
+  await booking.save();
 
   try {
     const emailData = approved
@@ -458,7 +527,6 @@ router.patch('/:id/verify-payment', protect, authorize('admin'), asyncHandler(as
     await sendEmail({ to: booking.user.email, subject: emailData.subject, html: emailData.html });
   } catch (e) {
     console.error('Verification email failed:', e.message);
-    // don't return 500 — booking is already saved
   }
 
   res.json({ success: true, booking });
