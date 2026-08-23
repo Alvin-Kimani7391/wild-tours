@@ -5,7 +5,7 @@ const Tour = require('../models/Tour');
 const Accommodation = require('../models/Accommodation');
 const { protect, authorize, asyncHandler } = require('../middleware/auth');
 const { sendEmail, emails } = require('../utils/emailService');
-const { upload, uploadToCloudinary } = require('../config/cloudinary');
+const { receiptUpload } = require('../config/cloudinary');
 
 const POPULATE_TOUR = 'title destination country duration price coverImage';
 const POPULATE_ACCOMMODATION = 'name slug category location pricePerNight priceType currency media.images';
@@ -24,6 +24,23 @@ async function isAccommodationAvailable(accommodationId, checkInDate, checkOutDa
 
   const clash = await Booking.findOne(query);
   return !clash;
+}
+
+// ── Helper: wrap a multer middleware so its errors (bad file type,
+// file too large, etc.) come back as clean JSON instead of crashing
+// through Express's default HTML error handler. ───────────────────
+function handleUpload(multerMiddleware) {
+  return (req, res, next) => {
+    multerMiddleware(req, res, (err) => {
+      if (err) {
+        const message = err.code === 'LIMIT_FILE_SIZE'
+          ? 'File is too large. Maximum size is 5MB.'
+          : (err.message || 'File upload failed.');
+        return res.status(400).json({ success: false, message });
+      }
+      next();
+    });
+  };
 }
 
 // ── POST /api/bookings ─ Create Booking (tour or accommodation) ──
@@ -244,7 +261,12 @@ router.get('/:id', protect, asyncHandler(async (req, res) => {
 }));
 
 // ── POST /api/bookings/:id/upload-proof ──────────────────
-router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(async (req, res) => {
+// Accepts JPG/PNG/WEBP images or PDF receipts via the dedicated
+// receiptUpload config (see config/cloudinary.js), which streams the
+// file straight to Cloudinary — so by the time this handler runs,
+// req.file.path is already the secure_url and req.file.filename is
+// already the public_id. No second upload call is needed.
+router.post('/:id/upload-proof', protect, handleUpload(receiptUpload.single('proof')), asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate('user', 'firstName lastName email')
     .populate('tour', 'title')
@@ -256,7 +278,6 @@ router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(a
   }
   if (!req.file) return res.status(400).json({ success: false, message: 'Please upload proof of payment.' });
 
-  const result = await uploadToCloudinary(req.file.path, 'wildroots/payment-proofs');
   const amount = req.body.amount || booking.depositAmount;
 
   booking.payments.push({
@@ -264,7 +285,7 @@ router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(a
     amount,
     reference: req.body.reference || '',
     status:    'pending_verification',
-    proofOfPayment: { url: result.secure_url, publicId: result.public_id },
+    proofOfPayment: { url: req.file.path, publicId: req.file.filename },
     bankName:      req.body.bankName || '',
     bankReference: req.body.bankReference || '',
   });
@@ -273,7 +294,7 @@ router.post('/:id/upload-proof', protect, upload.single('proof'), asyncHandler(a
   await booking.save();
 
   try {
-    const adminEmail = emails.bankReceiptAdminAlert(booking, booking.user, amount, result.secure_url);
+    const adminEmail = emails.bankReceiptAdminAlert(booking, booking.user, amount, req.file.path);
     await sendEmail({ to: process.env.ADMIN_EMAIL, subject: adminEmail.subject, html: adminEmail.html });
 
     const userEmail = emails.bankReceiptReceived(booking, booking.user, amount);

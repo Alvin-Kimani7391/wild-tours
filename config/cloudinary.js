@@ -56,6 +56,37 @@ const accommodationUpload = multer({
   }
 });
 
+// ── Payment receipts / proof-of-payment (bank transfer) ────
+// Used by POST /api/bookings/:id/upload-proof for both tour and
+// accommodation bookings. Receipts are frequently PDFs (bank apps
+// export statements as PDF), so this needs its own storage config —
+// the generic `upload`/`storage` above only allow image formats and
+// would silently reject a PDF receipt.
+//
+// resource_type: 'auto' lets Cloudinary route images to its image
+// pipeline and PDFs to its raw/image-as-document pipeline correctly.
+// Some Cloudinary accounts have PDF/raw delivery disabled by default
+// for security reasons — if uploads here start failing with an
+// "unsupported format" or "delivery disabled" error, enable PDF/raw
+// delivery in the Cloudinary dashboard under Settings → Security.
+const receiptStorage = new CloudinaryStorage({
+  cloudinary,
+  params: (req, file) => ({
+    folder: 'wildroots/payment-proofs',
+    resource_type: 'auto',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+  })
+});
+
+const receiptUpload = multer({
+  storage: receiptStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB — matches the limit shown in the booking UI
+  fileFilter: (req, file, cb) => {
+    const ok = /^image\/(jpeg|png|webp)$/.test(file.mimetype) || file.mimetype === 'application/pdf';
+    cb(ok ? null : new Error('Only JPG, PNG, WEBP images or PDF receipts are allowed.'), ok);
+  }
+});
+
 module.exports = {
   cloudinary,
   storage,
@@ -63,5 +94,7 @@ module.exports = {
   uploadToCloudinary,
   deleteFromCloudinary,
   accommodationStorage,
-  accommodationUpload
+  accommodationUpload,
+  receiptStorage,
+  receiptUpload
 };

@@ -5,7 +5,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
  * 🌍 BRAND CONFIG
  */
 const BRAND = {
-  name: 'Osimlai Adventuress',
+  name: 'International Volunteer HT',
   website: process.env.CLIENT_URL,
   colorPrimary: '#1a3c2e',
   colorAccent: '#d4a017',
