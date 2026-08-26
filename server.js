@@ -24,7 +24,7 @@ const uploadRoutes = require('./routes/uploads');
 const contactRoutes = require('./routes/contact');
 const galleryRoutes = require('./routes/gallery');
 const accommodationRoutes = require('./routes/accommodation');
-const { sitemapHandler } = require('./routes/generate-sitemap');
+const sitemapRoutes = require('./routes/generate-sitemap');
 
 // Passport config
 require('./config/passport')(passport);
@@ -105,8 +105,12 @@ app.use('/api/uploads', require('./routes/uploads'));
 app.use('/api/contact', require('./routes/contact'));
 app.use('/api/gallery', require('./routes/gallery'));
 app.use('/api/accommodations', require('./routes/accommodation'));
+
 // ── SITEMAP ──────────────────────────────────────────────
-app.get('/sitemap.xml', sitemapHandler);
+// generate-sitemap.js now exports a router with /sitemap.xml,
+// /sitemap-static.xml, /sitemap-programs.xml, /sitemap-tours.xml,
+// and /sitemap-accommodations.xml all mounted at root.
+app.use('/', sitemapRoutes);
 
 
 
