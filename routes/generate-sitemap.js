@@ -19,7 +19,7 @@ const express = require('express');
 const router = express.Router();
 
 // Double-check these paths/filenames/casing match your actual models dir
-const VolunteerProgram = require('../models/VolunteerProgram');
+const VolunteerProgram = require('../models/Volunteer');
 const Tour = require('../models/Tour');
 const Accommodation = require('../models/Accommodation');
 
