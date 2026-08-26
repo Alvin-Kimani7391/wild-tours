@@ -23,7 +23,7 @@ const VolunteerProgram = require('../models/Volunteer');
 const Tour = require('../models/Tour');
 const Accommodation = require('../models/Accommodation');
 
-const SITE_URL = (process.env.SITE_URL || 'https://internationalvolunteerhometz.org').replace(/\/$/, '');
+const SITE_URL = (process.env.SITE_URL || 'https://internationalvolunteerht.org').replace(/\/$/, '');
 
 const STATIC_PAGES = [
   { url: '/', changefreq: 'weekly', priority: 1.0 },
